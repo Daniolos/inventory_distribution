@@ -15,10 +15,10 @@ Verteilt Bestände von **Сток** oder **Фото склад** auf Geschäfte 
 
 ```bash
 # Von Сток verteilen (Standard)
-python script1_distribute_stock.py "Остатки + Сезон.xlsx" stock
+python distribute_stock.py "Остатки + Сезон.xlsx" stock
 
 # Von Фото склад verteilen
-python script1_distribute_stock.py "Остатки + Сезон.xlsx" photo
+python distribute_stock.py "Остатки + Сезон.xlsx" photo
 ```
 
 ### Logik

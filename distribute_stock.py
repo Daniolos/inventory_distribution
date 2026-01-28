@@ -125,7 +125,7 @@ if __name__ == "__main__":
     import sys
     
     if len(sys.argv) < 2:
-        print("Usage: python script1_distribute_stock.py <input_file.xlsx> [stock|photo]")
+        print("Usage: python distribute_stock.py <input_file.xlsx> [stock|photo]")
         print("  stock = distribute from Сток (default)")
         print("  photo = distribute from Фото склад")
         sys.exit(1)
