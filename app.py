@@ -31,7 +31,7 @@ from core.config import (
 
 # Page config
 st.set_page_config(
-    page_title="Inventory Distribution",
+    page_title="Распределение товаров",
     page_icon="📦",
     layout="wide",
 )
@@ -75,11 +75,11 @@ def validate_file(df: pd.DataFrame) -> tuple[bool, list[str]]:
     errors = []
 
     if PRODUCT_NAME_COLUMN not in df.columns:
-        errors.append(f"Column '{PRODUCT_NAME_COLUMN}' not found")
+        errors.append(f"Столбец '{PRODUCT_NAME_COLUMN}' не найден")
     if VARIANT_COLUMN not in df.columns:
-        errors.append(f"Column '{VARIANT_COLUMN}' not found")
+        errors.append(f"Столбец '{VARIANT_COLUMN}' не найден")
     if STOCK_COLUMN not in df.columns:
-        errors.append(f"Column '{STOCK_COLUMN}' not found")
+        errors.append(f"Столбец '{STOCK_COLUMN}' не найден")
 
     # Check for at least one store column
     store_columns = [
@@ -87,7 +87,7 @@ def validate_file(df: pd.DataFrame) -> tuple[bool, list[str]]:
         if col in st.session_state.store_priority
     ]
     if not store_columns:
-        errors.append("No known store columns found")
+        errors.append("Не найдены столбцы магазинов")
 
     return len(errors) == 0, errors
 
@@ -121,7 +121,7 @@ def render_filters(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
     if not has_collection and not has_additional_name:
         return df
 
-    with st.expander("🔍 Filter Options", expanded=False):
+    with st.expander("🔍 Фильтры", expanded=False):
         filtered_df = df.copy()
 
         if has_collection:
@@ -133,11 +133,11 @@ def render_filters(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
 
             if unique_collections:
                 selected_collections = st.multiselect(
-                    f"Filter by {COLLECTION_COLUMN}",
+                    f"Фильтр по {COLLECTION_COLUMN}",
                     options=unique_collections,
                     default=[],
                     key=f"{prefix}_filter_collection",
-                    help="Leave empty to include all"
+                    help="Оставьте пустым, чтобы включить всё"
                 )
                 if selected_collections:
                     # Apply same formatting when comparing
@@ -153,11 +153,11 @@ def render_filters(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
 
             if unique_names:
                 selected_names = st.multiselect(
-                    f"Filter by {ADDITIONAL_NAME_COLUMN}",
+                    f"Фильтр по {ADDITIONAL_NAME_COLUMN}",
                     options=unique_names,
                     default=[],
                     key=f"{prefix}_filter_additional_name",
-                    help="Leave empty to include all"
+                    help="Оставьте пустым, чтобы включить всё"
                 )
                 if selected_names:
                     # Apply same formatting when comparing
@@ -167,7 +167,7 @@ def render_filters(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
 
         # Show filter summary
         if len(filtered_df) != len(df):
-            st.info(f"Filtered: {len(filtered_df)} of {len(df)} rows")
+            st.info(f"Отфильтровано: {len(filtered_df)} из {len(df)} строк")
 
     return filtered_df
 
@@ -198,11 +198,11 @@ def find_header_row(file, max_rows: int = 20) -> tuple[int | None, str | None]:
 
         # Not found
         file.seek(0)
-        return None, f"Header row with '{PRODUCT_NAME_COLUMN}' not found in first {max_rows} rows"
+        return None, f"Строка заголовка с '{PRODUCT_NAME_COLUMN}' не найдена в первых {max_rows} строках"
 
     except Exception as e:
         file.seek(0)
-        return None, f"Error reading file: {e}"
+        return None, f"Ошибка чтения файла: {e}"
 
 
 def get_config() -> DistributionConfig:
@@ -228,14 +228,14 @@ def render_preview(previews: list[TransferPreview], prefix: str = "default"):
     total_quantity = sum(p.total_quantity for p in previews)
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total Rows", total_rows)
-    col2.metric("Rows with Transfers", rows_with_transfers)
-    col3.metric("Transfers", total_transfers)
-    col4.metric("Total Units", total_quantity)
+    col1.metric("Всего строк", total_rows)
+    col2.metric("Строк с перемещениями", rows_with_transfers)
+    col3.metric("Перемещения", total_transfers)
+    col4.metric("Всего единиц", total_quantity)
 
     # Filter options
     show_only_transfers = st.checkbox(
-        "Show only rows with transfers",
+        "Показать только строки с перемещениями",
         value=True,
         key=f"{prefix}_show_only_transfers"
     )
@@ -251,30 +251,30 @@ def render_preview(previews: list[TransferPreview], prefix: str = "default"):
 
         if preview.has_transfers:
             with st.expander(
-                f"Row {preview.row_index}: {preview.product_name}{variant_text} "
-                f"({len(preview.transfers)} Transfers)",
+                f"Строка {preview.row_index}: {preview.product_name}{variant_text} "
+                f"({len(preview.transfers)} перемещений)",
                 expanded=False
             ):
                 for transfer in preview.transfers:
                     receiver_display = transfer.receiver.split()[0] if transfer.receiver != "Сток" else "Сток"
-                    st.markdown(f"  └─ **{transfer.sender}** → **{receiver_display}**: {transfer.quantity} items")
+                    st.markdown(f"  └─ **{transfer.sender}** → **{receiver_display}**: {transfer.quantity} шт.")
         else:
             st.markdown(
-                f"**Row {preview.row_index}:** {preview.product_name}{variant_text} "
-                f"— *(no distribution)*"
+                f"**Строка {preview.row_index}:** {preview.product_name}{variant_text} "
+                f"— *(нет распределения)*"
             )
 
     if displayed == 0:
-        st.info("No transfers for the current settings.")
+        st.info("Нет перемещений для текущих настроек.")
 
 
 def render_results(results: list[TransferResult]):
     """Render the download section."""
-    st.success(f"{len(results)} transfer files generated!")
+    st.success(f"{len(results)} файлов перемещений создано!")
 
     # Summary
     total_items = sum(r.item_count for r in results)
-    st.metric("Total Entries", total_items)
+    st.metric("Всего записей", total_items)
 
     # ZIP download
     zip_buffer = io.BytesIO()
@@ -285,7 +285,7 @@ def render_results(results: list[TransferResult]):
             zip_file.writestr(result.filename, excel_buffer.getvalue())
 
     st.download_button(
-        label="Download All as ZIP",
+        label="Скачать всё в ZIP",
         data=zip_buffer.getvalue(),
         file_name=f"transfers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
         mime="application/zip",
@@ -293,18 +293,18 @@ def render_results(results: list[TransferResult]):
     )
 
     st.divider()
-    st.subheader("Individual Files")
+    st.subheader("Отдельные файлы")
 
     for result in results:
         col1, col2, col3 = st.columns([3, 1, 1])
         col1.markdown(f"**{result.filename}**")
-        col2.write(f"{result.item_count} entries")
+        col2.write(f"{result.item_count} записей")
 
         excel_buffer = io.BytesIO()
         result.data.to_excel(excel_buffer, index=False)
 
         col3.download_button(
-            label="Download",
+            label="Скачать",
             data=excel_buffer.getvalue(),
             file_name=result.filename,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -313,16 +313,16 @@ def render_results(results: list[TransferResult]):
 
 
 # Main UI
-st.title("📦 Inventory Distribution")
-st.markdown("Distribute inventory to stores")
+st.title("📦 Распределение товаров")
+st.markdown("Распределение товаров по магазинам")
 
 # Sidebar for configuration
 with st.sidebar:
-    st.header("⚙️ Configuration")
+    st.header("⚙️ Настройки")
 
     # Store priority editor
-    st.subheader("Priority Order")
-    st.caption("Stores at the top receive items first")
+    st.subheader("Порядок приоритета")
+    st.caption("Магазины сверху получают товары первыми")
 
     for idx, store in enumerate(st.session_state.store_priority):
         col1, col2, col3, col4 = st.columns([1, 6, 1, 1])
@@ -343,8 +343,8 @@ with st.sidebar:
     st.divider()
 
     # Exclusion editor
-    st.subheader("Excluded Stores")
-    st.caption("These stores receive no items")
+    st.subheader("Исключённые магазины")
+    st.caption("Эти магазины не получают товары")
 
     new_excluded = []
     for store in st.session_state.store_priority:
@@ -355,29 +355,29 @@ with st.sidebar:
 
 # Main content area
 tab1, tab2 = st.tabs([
-    "📤 Script 1: Stock → Stores",
-    "⚖️ Script 2: Balance Inventory"
+    "📤 Скрипт 1: Сток → Магазины",
+    "⚖️ Скрипт 2: Балансировка остатков"
 ])
 
 # Tab 1: Stock Distribution
 with tab1:
-    st.subheader("Distribute Stock to Stores")
+    st.subheader("Распределение со Стока в Магазины")
     st.markdown("""
-    Distributes inventory from **Сток** or **Фото склад** to stores with 0 inventory.
-    Each store receives a maximum of 1 item per product.
+    Распределяет товары из **Стока** или **Фото склада** в магазины с нулевыми остатками.
+    Каждый магазин получает максимум 1 единицу товара.
     """)
 
     # Source selection
     source_option = st.radio(
-        "Select source:",
-        ["Сток (Stock)", "Фото склад (Photo Stock)"],
+        "Выберите источник:",
+        ["Сток", "Фото склад"],
         horizontal=True,
     )
     source = "stock" if "Сток" in source_option else "photo"
 
     # File upload
     uploaded_file = st.file_uploader(
-        "Upload Excel File",
+        "Загрузить Excel файл",
         type=["xlsx"],
         key="file_script1",
     )
@@ -388,10 +388,10 @@ with tab1:
             header_row, header_error = find_header_row(uploaded_file)
             if header_error:
                 st.error(header_error)
-                st.info(f"Tip: Ensure the Excel file has '{PRODUCT_NAME_COLUMN}' as a column header.")
+                st.info(f"Совет: Убедитесь, что в Excel файле есть столбец '{PRODUCT_NAME_COLUMN}' в заголовке.")
             else:
                 df = pd.read_excel(uploaded_file, header=header_row)
-                st.success(f"File loaded: {len(df)} rows (header found in row {header_row + 1})")
+                st.success(f"Файл загружен: {len(df)} строк (заголовок найден в строке {header_row + 1})")
 
                 # Validate
                 is_valid, errors = validate_file(df)
@@ -405,56 +405,56 @@ with tab1:
                     # Preview button
                     col1, col2 = st.columns(2)
 
-                    if col1.button("Generate Preview", key="preview_script1", type="secondary"):
+                    if col1.button("Предпросмотр", key="preview_script1", type="secondary"):
                         config = get_config()
                         distributor = StockDistributor(config)
 
-                        with st.spinner("Generating preview..."):
+                        with st.spinner("Генерация предпросмотра..."):
                             st.session_state.preview_results_script1 = distributor.preview(df_filtered, source, header_row)
                             st.session_state.transfer_results_script1 = None
 
-                    if col2.button("Generate Transfers", key="execute_script1", type="primary"):
+                    if col2.button("Создать перемещения", key="execute_script1", type="primary"):
                         config = get_config()
                         distributor = StockDistributor(config)
 
-                        with st.spinner("Generating transfers..."):
+                        with st.spinner("Создание перемещений..."):
                             st.session_state.transfer_results_script1 = distributor.execute(df_filtered, source, header_row)
 
                     # Display results
                     if st.session_state.preview_results_script1 and not st.session_state.transfer_results_script1:
                         st.divider()
-                        st.subheader("Preview")
+                        st.subheader("Предпросмотр")
                         render_preview(st.session_state.preview_results_script1, prefix="script1")
 
                     if st.session_state.transfer_results_script1:
                         st.divider()
-                        st.subheader("Downloads")
+                        st.subheader("Загрузки")
                         render_results(st.session_state.transfer_results_script1)
 
         except Exception as e:
-            st.error(f"Error loading file: {e}")
+            st.error(f"Ошибка загрузки файла: {e}")
 
 # Tab 2: Inventory Balancing
 with tab2:
-    st.subheader("Balance Inventory Between Stores")
+    st.subheader("Балансировка остатков между магазинами")
     st.markdown("""
-    Distributes surplus from stores with high inventory to empty stores.
-    Remaining surplus goes back to **Сток**.
+    Распределяет излишки из магазинов с большими остатками в пустые магазины.
+    Оставшиеся излишки возвращаются на **Сток**.
     """)
 
     # Threshold setting
     threshold = st.number_input(
-        "Balance Threshold",
+        "Порог балансировки",
         min_value=1,
         max_value=10,
         value=st.session_state.balance_threshold,
-        help="Stores with more than this value will be balanced",
+        help="Магазины с количеством больше этого значения будут сбалансированы",
     )
     st.session_state.balance_threshold = threshold
 
     # File upload
     uploaded_file2 = st.file_uploader(
-        "Upload Excel File",
+        "Загрузить Excel файл",
         type=["xlsx"],
         key="file_script2",
     )
@@ -465,10 +465,10 @@ with tab2:
             header_row, header_error = find_header_row(uploaded_file2)
             if header_error:
                 st.error(header_error)
-                st.info(f"Tip: Ensure the Excel file has '{PRODUCT_NAME_COLUMN}' as a column header.")
+                st.info(f"Совет: Убедитесь, что в Excel файле есть столбец '{PRODUCT_NAME_COLUMN}' в заголовке.")
             else:
                 df2 = pd.read_excel(uploaded_file2, header=header_row)
-                st.success(f"File loaded: {len(df2)} rows (header found in row {header_row + 1})")
+                st.success(f"Файл загружен: {len(df2)} строк (заголовок найден в строке {header_row + 1})")
 
                 # Validate
                 is_valid, errors = validate_file(df2)
@@ -482,35 +482,35 @@ with tab2:
                     # Preview button
                     col1, col2 = st.columns(2)
 
-                    if col1.button("Generate Preview", key="preview_script2", type="secondary"):
+                    if col1.button("Предпросмотр", key="preview_script2", type="secondary"):
                         config = get_config()
                         balancer = InventoryBalancer(config)
 
-                        with st.spinner("Generating preview..."):
+                        with st.spinner("Генерация предпросмотра..."):
                             st.session_state.preview_results_script2 = balancer.preview(df2_filtered, header_row)
                             st.session_state.transfer_results_script2 = None
 
-                    if col2.button("Generate Transfers", key="execute_script2", type="primary"):
+                    if col2.button("Создать перемещения", key="execute_script2", type="primary"):
                         config = get_config()
                         balancer = InventoryBalancer(config)
 
-                        with st.spinner("Generating transfers..."):
+                        with st.spinner("Создание перемещений..."):
                             st.session_state.transfer_results_script2 = balancer.execute(df2_filtered, header_row)
 
                     # Display results
                     if st.session_state.preview_results_script2 and not st.session_state.transfer_results_script2:
                         st.divider()
-                        st.subheader("Preview")
+                        st.subheader("Предпросмотр")
                         render_preview(st.session_state.preview_results_script2, prefix="script2")
 
                     if st.session_state.transfer_results_script2:
                         st.divider()
-                        st.subheader("Downloads")
+                        st.subheader("Загрузки")
                         render_results(st.session_state.transfer_results_script2)
 
         except Exception as e:
-            st.error(f"Error loading file: {e}")
+            st.error(f"Ошибка загрузки файла: {e}")
 
 # Footer
 st.divider()
-st.caption("Inventory Distribution App v1.0")
+st.caption("Приложение «Распределение товаров» v1.0")
