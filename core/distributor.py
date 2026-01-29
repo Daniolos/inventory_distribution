@@ -28,7 +28,7 @@ class StockDistributor:
     Distributes inventory from Stock (Сток) or Photo Stock (Фото склад) to stores.
 
     Distribution rules:
-    - If store has 0-1 sizes of a product: add 3 different sizes (only if 3+ sizes available in stock)
+    - If store has 0-1 sizes of a product: add ALL available sizes (only if 3+ sizes available in stock)
     - If store has 2+ sizes of a product: normal distribution (1 item per variant with 0 stock)
     """
 
@@ -164,11 +164,8 @@ class StockDistributor:
 
                     # Need at least 3 different sizes to transfer
                     if len(transferable_rows) >= MIN_SIZES_TO_ADD:
-                        # Transfer first 3 sizes (respecting stock availability)
-                        transferred = 0
+                        # Transfer ALL sizes (minimum 3 required, checked above)
                         for row_data in transferable_rows:
-                            if transferred >= MIN_SIZES_TO_ADD:
-                                break
                             if remaining_stock[row_data["original_idx"]] > 0:
                                 # Create or get preview for this row
                                 if row_data["original_idx"] not in previews_dict:
@@ -184,7 +181,6 @@ class StockDistributor:
                                     quantity=1
                                 ))
                                 remaining_stock[row_data["original_idx"]] -= 1
-                                transferred += 1
 
                 else:
                     # Rule: Normal distribution - 1 item per variant with 0 stock
