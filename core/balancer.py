@@ -31,12 +31,13 @@ class InventoryBalancer:
     def __init__(self, config: DistributionConfig):
         self.config = config
 
-    def preview(self, df: pd.DataFrame) -> list[TransferPreview]:
+    def preview(self, df: pd.DataFrame, header_row: int = 0) -> list[TransferPreview]:
         """
         Generate preview of balancing operations without executing.
 
         Args:
             df: Input DataFrame (already loaded with correct header row)
+            header_row: 0-indexed header row in Excel (for displaying correct Excel row numbers)
 
         Returns:
             List of TransferPreview objects showing planned redistributions
@@ -57,8 +58,12 @@ class InventoryBalancer:
             product = row[self.config.product_name_column]
             variant = row.get(self.config.variant_column, "")
 
+            # Calculate Excel row: header_row (0-based) + 2 (1 for 1-based, 1 for data after header) + original_idx
+            # Using original_idx (pandas index) instead of idx to preserve correct row number after filtering
+            excel_row = header_row + 2 + original_idx
+
             preview = TransferPreview(
-                row_index=idx + 1,  # 1-based for display
+                row_index=excel_row,  # Excel row number for display
                 product_name=str(product) if pd.notna(product) else "",
                 variant=str(variant) if pd.notna(variant) else "",
             )
@@ -127,18 +132,19 @@ class InventoryBalancer:
 
         return previews
 
-    def execute(self, df: pd.DataFrame) -> list[TransferResult]:
+    def execute(self, df: pd.DataFrame, header_row: int = 0) -> list[TransferResult]:
         """
         Execute balancing and return transfer results.
 
         Args:
             df: Input DataFrame (already loaded with correct header row)
+            header_row: 0-indexed header row in Excel
 
         Returns:
             List of TransferResult objects ready for download
         """
         # Get preview (contains all transfers)
-        previews = self.preview(df)
+        previews = self.preview(df, header_row)
 
         # Group transfers by (sender, receiver)
         transfers_grouped: dict[tuple[str, str], list[tuple[str, str, int]]] = {}

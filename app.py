@@ -410,7 +410,7 @@ with tab1:
                         distributor = StockDistributor(config)
 
                         with st.spinner("Generating preview..."):
-                            st.session_state.preview_results_script1 = distributor.preview(df_filtered, source)
+                            st.session_state.preview_results_script1 = distributor.preview(df_filtered, source, header_row)
                             st.session_state.transfer_results_script1 = None
 
                     if col2.button("Generate Transfers", key="execute_script1", type="primary"):
@@ -418,7 +418,7 @@ with tab1:
                         distributor = StockDistributor(config)
 
                         with st.spinner("Generating transfers..."):
-                            st.session_state.transfer_results_script1 = distributor.execute(df_filtered, source)
+                            st.session_state.transfer_results_script1 = distributor.execute(df_filtered, source, header_row)
 
                     # Display results
                     if st.session_state.preview_results_script1 and not st.session_state.transfer_results_script1:
@@ -487,7 +487,7 @@ with tab2:
                         balancer = InventoryBalancer(config)
 
                         with st.spinner("Generating preview..."):
-                            st.session_state.preview_results_script2 = balancer.preview(df2_filtered)
+                            st.session_state.preview_results_script2 = balancer.preview(df2_filtered, header_row)
                             st.session_state.transfer_results_script2 = None
 
                     if col2.button("Generate Transfers", key="execute_script2", type="primary"):
@@ -495,7 +495,7 @@ with tab2:
                         balancer = InventoryBalancer(config)
 
                         with st.spinner("Generating transfers..."):
-                            st.session_state.transfer_results_script2 = balancer.execute(df2_filtered)
+                            st.session_state.transfer_results_script2 = balancer.execute(df2_filtered, header_row)
 
                     # Display results
                     if st.session_state.preview_results_script2 and not st.session_state.transfer_results_script2:

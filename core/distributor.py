@@ -49,10 +49,14 @@ class StockDistributor:
         self,
         df: pd.DataFrame,
         source_column: str,
-        active_stores: list[str]
+        active_stores: list[str],
+        header_row: int = 0
     ) -> dict:
         """
         Analyze inventory by product to understand size distribution.
+
+        Args:
+            header_row: 0-indexed header row in Excel (used to calculate Excel row numbers)
 
         Returns:
             Dict with product name as key, containing:
@@ -75,8 +79,12 @@ class StockDistributor:
             for store in active_stores:
                 store_quantities[store] = get_stock_value(row.get(store, 0))
 
+            # Calculate Excel row: header_row (0-based) + 2 (1 for 1-based, 1 for data after header) + original_idx
+            # Using original_idx (pandas index) instead of idx to preserve correct row number after filtering
+            excel_row = header_row + 2 + original_idx
+
             product_data[product]["rows"].append({
-                "row_idx": idx + 1,  # 1-based for display
+                "row_idx": excel_row,  # Excel row number for display
                 "variant": variant,
                 "source_qty": source_qty,
                 "store_quantities": store_quantities,
@@ -96,13 +104,14 @@ class StockDistributor:
                 sizes_with_stock.add(row_data["variant"])
         return len(sizes_with_stock)
 
-    def preview(self, df: pd.DataFrame, source: str = "stock") -> list[TransferPreview]:
+    def preview(self, df: pd.DataFrame, source: str = "stock", header_row: int = 0) -> list[TransferPreview]:
         """
         Generate preview of distributions without executing.
 
         Args:
             df: Input DataFrame (already loaded with correct header row)
             source: "stock" for Сток, "photo" for Фото склад
+            header_row: 0-indexed header row in Excel (for displaying correct Excel row numbers)
 
         Returns:
             List of TransferPreview objects showing planned distributions
@@ -121,7 +130,7 @@ class StockDistributor:
         ]
 
         # Analyze inventory by product
-        product_data = self._analyze_product_inventory(df_filtered, source_column, active_stores)
+        product_data = self._analyze_product_inventory(df_filtered, source_column, active_stores, header_row)
 
         # Track remaining stock per row (to avoid double-allocation)
         remaining_stock = {}
@@ -212,13 +221,14 @@ class StockDistributor:
         previews = sorted(previews_dict.values(), key=lambda p: p.row_index)
         return previews
 
-    def execute(self, df: pd.DataFrame, source: str = "stock") -> list[TransferResult]:
+    def execute(self, df: pd.DataFrame, source: str = "stock", header_row: int = 0) -> list[TransferResult]:
         """
         Execute distribution and return transfer results.
 
         Args:
             df: Input DataFrame (already loaded with correct header row)
             source: "stock" for Сток, "photo" for Фото склад
+            header_row: 0-indexed header row in Excel
 
         Returns:
             List of TransferResult objects ready for download
@@ -226,7 +236,7 @@ class StockDistributor:
         source_name = self._get_source_name(source)
 
         # Get preview (contains all transfers)
-        previews = self.preview(df, source)
+        previews = self.preview(df, source, header_row)
 
         # Group transfers by (sender, receiver)
         transfers_grouped: dict[tuple[str, str], list[tuple[str, str, int]]] = {}
