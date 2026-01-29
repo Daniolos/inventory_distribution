@@ -69,11 +69,11 @@ def validate_file(df: pd.DataFrame) -> tuple[bool, list[str]]:
     errors = []
 
     if PRODUCT_NAME_COLUMN not in df.columns:
-        errors.append(f"Spalte '{PRODUCT_NAME_COLUMN}' nicht gefunden")
+        errors.append(f"Column '{PRODUCT_NAME_COLUMN}' not found")
     if VARIANT_COLUMN not in df.columns:
-        errors.append(f"Spalte '{VARIANT_COLUMN}' nicht gefunden")
+        errors.append(f"Column '{VARIANT_COLUMN}' not found")
     if STOCK_COLUMN not in df.columns:
-        errors.append(f"Spalte '{STOCK_COLUMN}' nicht gefunden")
+        errors.append(f"Column '{STOCK_COLUMN}' not found")
 
     # Check for at least one store column
     store_columns = [
@@ -81,7 +81,7 @@ def validate_file(df: pd.DataFrame) -> tuple[bool, list[str]]:
         if col in st.session_state.store_priority
     ]
     if not store_columns:
-        errors.append("Keine bekannten Geschäft-Spalten gefunden")
+        errors.append("No known store columns found")
 
     return len(errors) == 0, errors
 
@@ -104,13 +104,13 @@ def render_preview(previews: list[TransferPreview]):
     total_quantity = sum(p.total_quantity for p in previews)
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Zeilen gesamt", total_rows)
-    col2.metric("Zeilen mit Transfers", rows_with_transfers)
+    col1.metric("Total Rows", total_rows)
+    col2.metric("Rows with Transfers", rows_with_transfers)
     col3.metric("Transfers", total_transfers)
-    col4.metric("Einheiten gesamt", total_quantity)
+    col4.metric("Total Units", total_quantity)
 
     # Filter options
-    show_only_transfers = st.checkbox("Nur Zeilen mit Zuweisungen anzeigen", value=True)
+    show_only_transfers = st.checkbox("Show only rows with transfers", value=True)
 
     # Display previews
     displayed = 0
@@ -123,30 +123,30 @@ def render_preview(previews: list[TransferPreview]):
 
         if preview.has_transfers:
             with st.expander(
-                f"Zeile {preview.row_index}: {preview.product_name}{variant_text} "
+                f"Row {preview.row_index}: {preview.product_name}{variant_text} "
                 f"({len(preview.transfers)} Transfers)",
                 expanded=False
             ):
                 for transfer in preview.transfers:
                     receiver_display = transfer.receiver.split()[0] if transfer.receiver != "Сток" else "Сток"
-                    st.markdown(f"  └─ **{transfer.sender}** → **{receiver_display}**: {transfer.quantity} Stück")
+                    st.markdown(f"  └─ **{transfer.sender}** → **{receiver_display}**: {transfer.quantity} items")
         else:
             st.markdown(
-                f"**Zeile {preview.row_index}:** {preview.product_name}{variant_text} "
-                f"— *(keine Verteilung)*"
+                f"**Row {preview.row_index}:** {preview.product_name}{variant_text} "
+                f"— *(no distribution)*"
             )
 
     if displayed == 0:
-        st.info("Keine Zuweisungen für die aktuellen Einstellungen.")
+        st.info("No transfers for the current settings.")
 
 
 def render_results(results: list[TransferResult]):
     """Render the download section."""
-    st.success(f"{len(results)} Transfer-Dateien generiert!")
+    st.success(f"{len(results)} transfer files generated!")
 
     # Summary
     total_items = sum(r.item_count for r in results)
-    st.metric("Gesamte Einträge", total_items)
+    st.metric("Total Entries", total_items)
 
     # ZIP download
     zip_buffer = io.BytesIO()
@@ -157,7 +157,7 @@ def render_results(results: list[TransferResult]):
             zip_file.writestr(result.filename, excel_buffer.getvalue())
 
     st.download_button(
-        label="Alle als ZIP herunterladen",
+        label="Download All as ZIP",
         data=zip_buffer.getvalue(),
         file_name=f"transfers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
         mime="application/zip",
@@ -165,12 +165,12 @@ def render_results(results: list[TransferResult]):
     )
 
     st.divider()
-    st.subheader("Einzelne Dateien")
+    st.subheader("Individual Files")
 
     for result in results:
         col1, col2, col3 = st.columns([3, 1, 1])
         col1.markdown(f"**{result.filename}**")
-        col2.write(f"{result.item_count} Einträge")
+        col2.write(f"{result.item_count} entries")
 
         excel_buffer = io.BytesIO()
         result.data.to_excel(excel_buffer, index=False)
@@ -186,15 +186,15 @@ def render_results(results: list[TransferResult]):
 
 # Main UI
 st.title("📦 Inventory Distribution")
-st.markdown("Verteile Lagerbestände auf Geschäfte")
+st.markdown("Distribute inventory to stores")
 
 # Sidebar for configuration
 with st.sidebar:
-    st.header("⚙️ Konfiguration")
+    st.header("⚙️ Configuration")
 
     # Store priority editor
-    st.subheader("Prioritätsreihenfolge")
-    st.caption("Geschäfte oben erhalten Ware zuerst")
+    st.subheader("Priority Order")
+    st.caption("Stores at the top receive items first")
 
     for idx, store in enumerate(st.session_state.store_priority):
         col1, col2, col3, col4 = st.columns([1, 6, 1, 1])
@@ -215,8 +215,8 @@ with st.sidebar:
     st.divider()
 
     # Exclusion editor
-    st.subheader("Ausgeschlossene Geschäfte")
-    st.caption("Diese erhalten keine Ware")
+    st.subheader("Excluded Stores")
+    st.caption("These stores receive no items")
 
     new_excluded = []
     for store in st.session_state.store_priority:
@@ -227,21 +227,21 @@ with st.sidebar:
 
 # Main content area
 tab1, tab2 = st.tabs([
-    "📤 Script 1: Stock → Geschäfte",
-    "⚖️ Script 2: Bestände ausgleichen"
+    "📤 Script 1: Stock → Stores",
+    "⚖️ Script 2: Balance Inventory"
 ])
 
 # Tab 1: Stock Distribution
 with tab1:
-    st.subheader("Stock an Geschäfte verteilen")
+    st.subheader("Distribute Stock to Stores")
     st.markdown("""
-    Verteilt Bestände von **Сток** oder **Фото склад** auf Geschäfte die 0 Bestand haben.
-    Jedes Geschäft erhält maximal 1 Stück pro Produkt.
+    Distributes inventory from **Сток** or **Фото склад** to stores with 0 inventory.
+    Each store receives a maximum of 1 item per product.
     """)
 
     # Source selection
     source_option = st.radio(
-        "Quelle auswählen:",
+        "Select source:",
         ["Сток (Stock)", "Фото склад (Photo Stock)"],
         horizontal=True,
     )
@@ -249,7 +249,7 @@ with tab1:
 
     # File upload
     uploaded_file = st.file_uploader(
-        "Excel-Datei hochladen",
+        "Upload Excel File",
         type=["xlsx"],
         key="file_script1",
     )
@@ -257,7 +257,7 @@ with tab1:
     if uploaded_file:
         try:
             df = pd.read_excel(uploaded_file, header=INPUT_HEADER_ROW)
-            st.success(f"Datei geladen: {len(df)} Zeilen")
+            st.success(f"File loaded: {len(df)} rows")
 
             # Validate
             is_valid, errors = validate_file(df)
@@ -268,25 +268,25 @@ with tab1:
                 # Preview button
                 col1, col2 = st.columns(2)
 
-                if col1.button("Vorschau generieren", key="preview_script1", type="secondary"):
+                if col1.button("Generate Preview", key="preview_script1", type="secondary"):
                     config = get_config()
                     distributor = StockDistributor(config)
 
-                    with st.spinner("Generiere Vorschau..."):
+                    with st.spinner("Generating preview..."):
                         st.session_state.preview_results = distributor.preview(df, source)
                         st.session_state.transfer_results = None
 
-                if col2.button("Transfers generieren", key="execute_script1", type="primary"):
+                if col2.button("Generate Transfers", key="execute_script1", type="primary"):
                     config = get_config()
                     distributor = StockDistributor(config)
 
-                    with st.spinner("Generiere Transfers..."):
+                    with st.spinner("Generating transfers..."):
                         st.session_state.transfer_results = distributor.execute(df, source)
 
                 # Display results
                 if st.session_state.preview_results and not st.session_state.transfer_results:
                     st.divider()
-                    st.subheader("Vorschau")
+                    st.subheader("Preview")
                     render_preview(st.session_state.preview_results)
 
                 if st.session_state.transfer_results:
@@ -295,14 +295,14 @@ with tab1:
                     render_results(st.session_state.transfer_results)
 
         except Exception as e:
-            st.error(f"Fehler beim Laden der Datei: {e}")
+            st.error(f"Error loading file: {e}")
 
 # Tab 2: Inventory Balancing
 with tab2:
-    st.subheader("Bestände zwischen Geschäften ausgleichen")
+    st.subheader("Balance Inventory Between Stores")
     st.markdown("""
-    Verteilt Überschuss von Geschäften mit hohem Bestand auf leere Geschäfte.
-    Restlicher Überschuss geht zurück zu **Сток**.
+    Distributes surplus from stores with high inventory to empty stores.
+    Remaining surplus goes back to **Сток**.
     """)
 
     # Threshold setting
@@ -311,13 +311,13 @@ with tab2:
         min_value=1,
         max_value=10,
         value=st.session_state.balance_threshold,
-        help="Geschäfte mit mehr als diesem Wert werden ausgeglichen",
+        help="Stores with more than this value will be balanced",
     )
     st.session_state.balance_threshold = threshold
 
     # File upload
     uploaded_file2 = st.file_uploader(
-        "Excel-Datei hochladen",
+        "Upload Excel File",
         type=["xlsx"],
         key="file_script2",
     )
@@ -325,7 +325,7 @@ with tab2:
     if uploaded_file2:
         try:
             df2 = pd.read_excel(uploaded_file2, header=INPUT_HEADER_ROW)
-            st.success(f"Datei geladen: {len(df2)} Zeilen")
+            st.success(f"File loaded: {len(df2)} rows")
 
             # Validate
             is_valid, errors = validate_file(df2)
@@ -336,25 +336,25 @@ with tab2:
                 # Preview button
                 col1, col2 = st.columns(2)
 
-                if col1.button("Vorschau generieren", key="preview_script2", type="secondary"):
+                if col1.button("Generate Preview", key="preview_script2", type="secondary"):
                     config = get_config()
                     balancer = InventoryBalancer(config)
 
-                    with st.spinner("Generiere Vorschau..."):
+                    with st.spinner("Generating preview..."):
                         st.session_state.preview_results = balancer.preview(df2)
                         st.session_state.transfer_results = None
 
-                if col2.button("Transfers generieren", key="execute_script2", type="primary"):
+                if col2.button("Generate Transfers", key="execute_script2", type="primary"):
                     config = get_config()
                     balancer = InventoryBalancer(config)
 
-                    with st.spinner("Generiere Transfers..."):
+                    with st.spinner("Generating transfers..."):
                         st.session_state.transfer_results = balancer.execute(df2)
 
                 # Display results
                 if st.session_state.preview_results and not st.session_state.transfer_results:
                     st.divider()
-                    st.subheader("Vorschau")
+                    st.subheader("Preview")
                     render_preview(st.session_state.preview_results)
 
                 if st.session_state.transfer_results:
@@ -363,7 +363,7 @@ with tab2:
                     render_results(st.session_state.transfer_results)
 
         except Exception as e:
-            st.error(f"Fehler beim Laden der Datei: {e}")
+            st.error(f"Error loading file: {e}")
 
 # Footer
 st.divider()

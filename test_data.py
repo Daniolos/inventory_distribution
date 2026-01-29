@@ -9,9 +9,9 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 # Define test scenarios
 scenarios = [
     {
-        "name": "S1: Stock voll, alle Geschäfte leer",
-        "description": "Stock=5, alle 0 → verteilt 1 an jeden (max 5 Geschäfte)",
-        "Номенклатура": "Test Produkt A",
+        "name": "S1: Stock full, all stores empty",
+        "description": "Stock=5, all 0 → distributes 1 to each (max 5 stores)",
+        "Номенклатура": "Test Product A",
         "Характеристика": "Size M",
         "125004 EKT-PC-Гринвич": 0,
         "125005 EKT-PC-Мега": 0,
@@ -26,13 +26,13 @@ scenarios = [
         "150002 MSK-DV-Капитолий": 0,
         "Сток": 5,
         "Фото склад": 0,
-        "expected_script1": "125007=1, 125008=1, 129877=1, 130143=1, 150002=1 (Prio-Reihenfolge)",
-        "expected_script2": "Keine Änderung (kein Geschäft >2)",
+        "expected_script1": "125007=1, 125008=1, 129877=1, 130143=1, 150002=1 (priority order)",
+        "expected_script2": "No change (no store >2)",
     },
     {
-        "name": "S2: Stock voll, manche Geschäfte haben schon",
-        "description": "Stock=3, 125007 und 125008 haben schon 1 → nur an leere verteilen",
-        "Номенклатура": "Test Produkt B",
+        "name": "S2: Stock full, some stores already have",
+        "description": "Stock=3, 125007 and 125008 already have 1 → only distribute to empty",
+        "Номенклатура": "Test Product B",
         "Характеристика": "Size L",
         "125004 EKT-PC-Гринвич": 0,
         "125005 EKT-PC-Мега": 0,
@@ -47,13 +47,13 @@ scenarios = [
         "150002 MSK-DV-Капитолий": 0,
         "Сток": 3,
         "Фото склад": 0,
-        "expected_script1": "129877=1, 130143=1, 150002=1 (überspringt 125007, 125008)",
-        "expected_script2": "Keine Änderung",
+        "expected_script1": "129877=1, 130143=1, 150002=1 (skips 125007, 125008)",
+        "expected_script2": "No change",
     },
     {
-        "name": "S3: Stock leer",
-        "description": "Stock=0 → nichts passiert",
-        "Номенклатура": "Test Produkt C",
+        "name": "S3: Stock empty",
+        "description": "Stock=0 → nothing happens",
+        "Номенклатура": "Test Product C",
         "Характеристика": "Size S",
         "125004 EKT-PC-Гринвич": 0,
         "125005 EKT-PC-Мега": 0,
@@ -68,13 +68,13 @@ scenarios = [
         "150002 MSK-DV-Капитолий": 0,
         "Сток": 0,
         "Фото склад": 0,
-        "expected_script1": "Keine Verteilung (Stock=0)",
-        "expected_script2": "Keine Änderung",
+        "expected_script1": "No distribution (Stock=0)",
+        "expected_script2": "No change",
     },
     {
-        "name": "S4: Alle Geschäfte voll, Stock hat noch",
-        "description": "Stock=3, alle haben 1 → Stock bleibt (nichts zu verteilen)",
-        "Номенклатура": "Test Produkt D",
+        "name": "S4: All stores full, Stock still has",
+        "description": "Stock=3, all have 1 → Stock remains (nothing to distribute)",
+        "Номенклатура": "Test Product D",
         "Характеристика": "Size XL",
         "125004 EKT-PC-Гринвич": 1,
         "125005 EKT-PC-Мега": 1,
@@ -89,13 +89,13 @@ scenarios = [
         "150002 MSK-DV-Капитолий": 1,
         "Сток": 3,
         "Фото склад": 0,
-        "expected_script1": "Keine Verteilung (alle Geschäfte >0)",
-        "expected_script2": "Keine Änderung (keiner >2)",
+        "expected_script1": "No distribution (all stores >0)",
+        "expected_script2": "No change (none >2)",
     },
     {
-        "name": "S5: Ein Geschäft hat >2, andere leer",
-        "description": "125007=5, andere=0 → verteilt Überschuss (5-2=3) an leere",
-        "Номенклатура": "Test Produkt E",
+        "name": "S5: One store has >2, others empty",
+        "description": "125007=5, others=0 → distributes surplus (5-2=3) to empty",
+        "Номенклатура": "Test Product E",
         "Характеристика": "Size M",
         "125004 EKT-PC-Гринвич": 0,
         "125005 EKT-PC-Мега": 0,
@@ -110,13 +110,13 @@ scenarios = [
         "150002 MSK-DV-Капитолий": 0,
         "Сток": 0,
         "Фото склад": 0,
-        "expected_script1": "Keine Änderung (Stock=0)",
+        "expected_script1": "No change (Stock=0)",
         "expected_script2": "125007→125008=1, 125007→129877=1, 125007→130143=1",
     },
     {
-        "name": "S6: Mehrere Geschäfte >2, nimmt vom höchsten zuerst",
-        "description": "125007=4, 125008=6 → nimmt von 125008 zuerst (höchster)",
-        "Номенклатура": "Test Produkt F",
+        "name": "S6: Multiple stores >2, takes from highest first",
+        "description": "125007=4, 125008=6 → takes from 125008 first (highest)",
+        "Номенклатура": "Test Product F",
         "Характеристика": "Size L",
         "125004 EKT-PC-Гринвич": 0,
         "125005 EKT-PC-Мега": 0,
@@ -131,13 +131,13 @@ scenarios = [
         "150002 MSK-DV-Капитолий": 0,
         "Сток": 0,
         "Фото склад": 0,
-        "expected_script1": "Keine Änderung (Stock=0)",
-        "expected_script2": "125008 verteilt 4 (an 129877,130143,150002,125009), dann 125007 verteilt 2 (an 125011,125004)",
+        "expected_script1": "No change (Stock=0)",
+        "expected_script2": "125008 distributes 4 (to 129877,130143,150002,125009), then 125007 distributes 2 (to 125011,125004)",
     },
     {
-        "name": "S7: Überschuss geht zu Stock",
-        "description": "125007=10, alle anderen haben schon 1 → Rest zu Stock",
-        "Номенклатура": "Test Produkt G",
+        "name": "S7: Surplus goes to Stock",
+        "description": "125007=10, all others already have 1 → remainder to Stock",
+        "Номенклатура": "Test Product G",
         "Характеристика": "Size S",
         "125004 EKT-PC-Гринвич": 1,
         "125005 EKT-PC-Мега": 1,
@@ -152,13 +152,13 @@ scenarios = [
         "150002 MSK-DV-Капитолий": 1,
         "Сток": 0,
         "Фото склад": 0,
-        "expected_script1": "Keine Änderung (Stock=0, alle >0)",
-        "expected_script2": "125007→Сток=8 (Überschuss 10-2=8, keine leeren Geschäfte)",
+        "expected_script1": "No change (Stock=0, all >0)",
+        "expected_script2": "125007→Сток=8 (surplus 10-2=8, no empty stores)",
     },
     {
-        "name": "S8: Фото склад Verteilung",
-        "description": "Фото склад=3, Stock=0, alle leer → verteilt von Фото",
-        "Номенклатура": "Test Produkt H",
+        "name": "S8: Photo Stock Distribution",
+        "description": "Photo Stock=3, Stock=0, all empty → distributes from Photo",
+        "Номенклатура": "Test Product H",
         "Характеристика": "Size M",
         "125004 EKT-PC-Гринвич": 0,
         "125005 EKT-PC-Мега": 0,
@@ -173,15 +173,15 @@ scenarios = [
         "150002 MSK-DV-Капитолий": 0,
         "Сток": 0,
         "Фото склад": 3,
-        "expected_script1": "Mit 'photo': 125007=1, 125008=1, 129877=1",
-        "expected_script2": "Keine Änderung",
+        "expected_script1": "With 'photo': 125007=1, 125008=1, 129877=1",
+        "expected_script2": "No change",
     },
 ]
 
 def create_test_excel():
     wb = Workbook()
     
-    # Sheet 1: Test Data (im Format der echten Input-Datei)
+    # Sheet 1: Test Data (in format of real input file)
     ws_data = wb.active
     ws_data.title = "Test Input"
     
@@ -234,10 +234,10 @@ def create_test_excel():
     
     # Sheet 2: Expected Results
     ws_expected = wb.create_sheet("Expected Results")
-    ws_expected['A1'] = "Szenario"
-    ws_expected['B1'] = "Beschreibung"
-    ws_expected['C1'] = "Erwartet Script 1 (Stock→Geschäfte)"
-    ws_expected['D1'] = "Erwartet Script 2 (Ausgleich)"
+    ws_expected['A1'] = "Scenario"
+    ws_expected['B1'] = "Description"
+    ws_expected['C1'] = "Expected Script 1 (Stock→Stores)"
+    ws_expected['D1'] = "Expected Script 2 (Balance)"
     
     for col in range(1, 5):
         ws_expected.cell(row=1, column=col).font = Font(bold=True)

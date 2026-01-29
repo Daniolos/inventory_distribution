@@ -1,54 +1,54 @@
-# Inventory Distribution App - Anforderungen für Claude Code
+# Inventory Distribution App - Requirements for Claude Code
 
-## Projektübersicht
+## Project Overview
 
-Es existieren bereits zwei funktionierende Python-Skripte für Lagerbestandsverteilung. Diese sollen jetzt in eine benutzerfreundliche Web-App überführt werden, die von Non-Techies bedient werden kann.
+Two working Python scripts for inventory distribution already exist. These should now be converted into a user-friendly web app that can be operated by non-technical users.
 
 ---
 
-## Existierender Code
+## Existing Code
 
-### Dateien im Projekt
+### Project Files
 
 ```
 inventory_distribution/
-├── config.py                    # Konfiguration (Prioritäten, Ausschlüsse)
-├── distribute_stock.py  # Stock → Geschäfte verteilen
-├── balance_inventory.py # Bestände ausgleichen
-├── test_scenarios.xlsx          # Test-Datei mit 8 Szenarien
-├── test_data.py                 # Generator für Test-Datei
+├── config.py                    # Configuration (priorities, exclusions)
+├── distribute_stock.py  # Stock → Stores distribution
+├── balance_inventory.py # Balance inventory
+├── test_scenarios.xlsx          # Test file with 8 scenarios
+├── test_data.py                 # Generator for test file
 └── README.md
 ```
 
-### Script 1: Stock → Geschäfte (`distribute_stock.py`)
+### Script 1: Stock → Stores (`distribute_stock.py`)
 
-**Funktion:** Verteilt Bestände von "Сток" (Stock) oder "Фото склад" (Photo Stock) auf Geschäfte.
+**Function:** Distributes inventory from "Сток" (Stock) or "Фото склад" (Photo Stock) to stores.
 
-**Logik:**
-- Geht jede Zeile im Input-Excel durch
-- Für jedes Geschäft mit Bestand = 0: Verteilt 1 Stück
-- Folgt der Prioritätsreihenfolge aus `config.py`
-- Überspringt ausgeschlossene Geschäfte
-- Verteilt maximal so viele Stücke wie im Stock vorhanden
+**Logic:**
+- Goes through each row in the input Excel
+- For each store with inventory = 0: Distributes 1 item
+- Follows the priority order from `config.py`
+- Skips excluded stores
+- Distributes maximum as many items as available in Stock
 
-**Parameter:**
-- `source`: "stock" (Сток) oder "photo" (Фото склад)
+**Parameters:**
+- `source`: "stock" (Сток) or "photo" (Фото склад)
 
-### Script 2: Bestände ausgleichen (`balance_inventory.py`)
+### Script 2: Balance Inventory (`balance_inventory.py`)
 
-**Funktion:** Gleicht Bestände zwischen Geschäften aus.
+**Function:** Balances inventory between stores.
 
-**Logik:**
-- Findet Geschäfte mit Bestand > BALANCE_THRESHOLD (Standard: 2)
-- Nimmt zuerst vom Geschäft mit dem höchsten Bestand
-- Verteilt Überschuss auf Geschäfte mit Bestand = 0 (Prioritätsreihenfolge)
-- Wenn alle Geschäfte Bestand haben: Rest geht zu Stock
+**Logic:**
+- Finds stores with inventory > BALANCE_THRESHOLD (default: 2)
+- Takes from store with highest inventory first
+- Distributes surplus to stores with inventory = 0 (priority order)
+- If all stores have inventory: remainder goes to Stock
 
-### Konfiguration (`config.py`)
+### Configuration (`config.py`)
 
 ```python
 STORE_PRIORITY = [
-    "125007 MSK-PC-Гагаринский",      # Höchste Priorität
+    "125007 MSK-PC-Гагаринский",      # Highest priority
     "125008 MSK-PC-РИО Ленинский",
     "129877 MSK-PC-Мега 1 Теплый Стан",
     "130143 MSK-PCM-Мега 2 Химки",
@@ -58,142 +58,142 @@ STORE_PRIORITY = [
     "125004 EKT-PC-Гринвич",
     "125005 EKT-PC-Мега",
     "125006 KZN-PC-Мега",
-    "125839 - MSK-PC-Outlet Белая Дача",  # Niedrigste Priorität
+    "125839 - MSK-PC-Outlet Белая Дача",  # Lowest priority
 ]
 
-EXCLUDED_STORES = []  # Geschäfte die nichts bekommen
+EXCLUDED_STORES = []  # Stores that receive nothing
 
-BALANCE_THRESHOLD = 2  # Geschäfte mit > 2 Teilen werden ausgeglichen
+BALANCE_THRESHOLD = 2  # Stores with > 2 items will be balanced
 ```
 
-### Input-Format (Excel)
+### Input Format (Excel)
 
-- Header in Zeile 7 (0-indexed: row 6)
-- Spalten für Produktidentifikation: `Номенклатура`, `Характеристика`
-- Spalten für Geschäfte: z.B. `125007 MSK-PC-Гагаринский`
-- Spalten für Lager: `Сток`, `Фото склад`
-- Werte: Integer (Anzahl) oder leer (= 0)
+- Header in row 7 (0-indexed: row 6)
+- Columns for product identification: `Номенклатура`, `Характеристика`
+- Columns for stores: e.g. `125007 MSK-PC-Гагаринский`
+- Columns for warehouse: `Сток`, `Фото склад`
+- Values: Integer (quantity) or empty (= 0)
 
-### Output-Format (Excel)
+### Output Format (Excel)
 
-Separate Dateien pro Sender-Empfänger-Kombination:
-- Filename: `{Sender}_to_{Empfänger}_{Timestamp}.xlsx`
-- Spalten: `Артикул`, `Код номенклатуры`, `Номенклатура`, `Характеристика`, `Назначение`, `Серия`, `Код упаковки`, `Упаковка`, `Количество`
-- Nur `Номенклатура`, `Характеристика`, `Количество` werden gefüllt
+Separate files per sender-receiver combination:
+- Filename: `{Sender}_to_{Receiver}_{Timestamp}.xlsx`
+- Columns: `Артикул`, `Код номенклатуры`, `Номенклатура`, `Характеристика`, `Назначение`, `Серия`, `Код упаковки`, `Упаковка`, `Количество`
+- Only `Номенклатура`, `Характеристика`, `Количество` are filled
 
 ---
 
-## Anforderungen an die Streamlit App
+## Streamlit App Requirements
 
-### 1. Grundlegende UI-Elemente
+### 1. Basic UI Elements
 
 #### File Upload
-- Drag & Drop Zone für Excel-Datei (.xlsx)
-- Anzeige des Dateinamens und der Zeilenanzahl nach Upload
-- Validierung: Prüfen ob erwartete Spalten vorhanden sind
+- Drag & Drop zone for Excel file (.xlsx)
+- Display filename and row count after upload
+- Validation: Check if expected columns are present
 
-#### Skript-Auswahl
-- Radio Buttons oder Tabs:
-  - "Script 1: Stock → Geschäfte verteilen"
-  - "Script 2: Bestände ausgleichen"
+#### Script Selection
+- Radio Buttons or Tabs:
+  - "Script 1: Stock → Stores Distribution"
+  - "Script 2: Balance Inventory"
 
-#### Script 1 spezifische Optionen
-- Dropdown/Radio: Quelle auswählen
+#### Script 1 Specific Options
+- Dropdown/Radio: Select source
   - "Сток (Stock)"
   - "Фото склад (Photo Stock)"
 
-#### Script 2 spezifische Optionen
-- Number Input: Balance Threshold (Standard: 2)
+#### Script 2 Specific Options
+- Number Input: Balance Threshold (default: 2)
 
-### 2. Konfiguration (für beide Skripte)
+### 2. Configuration (for both scripts)
 
-#### Prioritäts-Editor
-- Sortierbare Liste aller Geschäfte
-- Drag & Drop zum Umsortieren ODER Auf/Ab-Buttons
-- Aktuelle Priorität als nummerierte Liste anzeigen
+#### Priority Editor
+- Sortable list of all stores
+- Drag & Drop for reordering OR Up/Down buttons
+- Display current priority as numbered list
 
-#### Ausschluss-Editor
-- Checkboxen für jedes Geschäft
-- Ausgewählte Geschäfte werden von der Verteilung ausgeschlossen
+#### Exclusion Editor
+- Checkboxes for each store
+- Selected stores are excluded from distribution
 
-### 3. Vorschau / Zwischenschritt-Anzeige (WICHTIG!)
+### 3. Preview / Intermediate Step Display (IMPORTANT!)
 
-**Vor der Ausführung:** 
-- Button "Vorschau generieren"
-- Zeigt pro Input-Zeile die geplanten Zuweisungen an
+**Before execution:**
+- Button "Generate Preview"
+- Shows planned assignments per input row
 
-**Darstellung:**
+**Display:**
 ```
-Zeile 1: Test Produkt A / Size M
-  └─ Сток → 125007: 1 Stück
-  └─ Сток → 125008: 1 Stück
-  └─ Сток → 129877: 1 Stück
+Row 1: Test Product A / Size M
+  └─ Сток → 125007: 1 item
+  └─ Сток → 125008: 1 item
+  └─ Сток → 129877: 1 item
 
-Zeile 2: Test Produkt B / Size L
-  └─ Сток → 129877: 1 Stück
-  └─ Сток → 130143: 1 Stück
+Row 2: Test Product B / Size L
+  └─ Сток → 129877: 1 item
+  └─ Сток → 130143: 1 item
 
-Zeile 3: Test Produkt C / Size S
-  └─ (keine Verteilung - Stock = 0)
+Row 3: Test Product C / Size S
+  └─ (no distribution - Stock = 0)
 ```
 
 **Features:**
-- Expandable/Collapsible pro Zeile (bei vielen Zeilen)
-- Filter: Nur Zeilen mit Zuweisungen anzeigen
-- Suchfeld: Nach Produktname filtern
-- Zusammenfassung oben: "X Zeilen, Y Zuweisungen total"
+- Expandable/Collapsible per row (for many rows)
+- Filter: Show only rows with assignments
+- Search field: Filter by product name
+- Summary at top: "X rows, Y total assignments"
 
-### 4. Ausführung und Download
+### 4. Execution and Download
 
-#### Ausführen-Button
-- "Transfers generieren"
-- Progress Bar während der Verarbeitung
-- Erfolgsmeldung mit Zusammenfassung
+#### Execute Button
+- "Generate Transfers"
+- Progress bar during processing
+- Success message with summary
 
-#### Download-Bereich
-- Liste aller generierten Dateien
-- "Alle als ZIP herunterladen" Button
-- Einzelne Dateien zum Download anklickbar
-- Anzeige: Dateiname + Anzahl Einträge
+#### Download Section
+- List of all generated files
+- "Download All as ZIP" button
+- Individual files clickable for download
+- Display: Filename + number of entries
 
-### 5. Zusätzliche Features
+### 5. Additional Features
 
-#### Validierung & Fehlerbehandlung
-- Warnung bei unbekannten Spalten im Input
-- Fehleranzeige wenn Geschäft aus Config nicht im Input existiert
-- Info wenn keine Verteilungen möglich sind
+#### Validation & Error Handling
+- Warning for unknown columns in input
+- Error display when store from config doesn't exist in input
+- Info when no distributions are possible
 
 #### Session State
-- Konfiguration bleibt erhalten während der Session
-- Option: Konfiguration als JSON exportieren/importieren
+- Configuration is preserved during session
+- Option: Export/import configuration as JSON
 
-#### Help/Dokumentation
-- Sidebar oder Expander mit Erklärung der Logik
-- Tooltip bei den Konfigurationsoptionen
+#### Help/Documentation
+- Sidebar or expander with logic explanation
+- Tooltip for configuration options
 
 ---
 
-## Technische Anforderungen
+## Technical Requirements
 
 ### Deployment
 
-**Ziel: Streamlit Community Cloud**
-- Kostenloses Hosting
-- Deployment direkt aus GitHub
-- Keine Server-Konfiguration nötig
+**Target: Streamlit Community Cloud**
+- Free hosting
+- Deployment directly from GitHub
+- No server configuration needed
 
-**Repository-Struktur:**
+**Repository Structure:**
 ```
 inventory-distribution-app/
-├── app.py                  # Streamlit Hauptanwendung
+├── app.py                  # Streamlit main application
 ├── core/
 │   ├── __init__.py
-│   ├── distributor.py      # Script 1 Logik (refactored)
-│   ├── balancer.py         # Script 2 Logik (refactored)
-│   └── config.py           # Default-Konfiguration
+│   ├── distributor.py      # Script 1 logic (refactored)
+│   ├── balancer.py         # Script 2 logic (refactored)
+│   └── config.py           # Default configuration
 ├── requirements.txt        # Dependencies
 ├── .streamlit/
-│   └── config.toml         # Streamlit Config (Theme etc.)
+│   └── config.toml         # Streamlit config (theme etc.)
 └── README.md
 ```
 
@@ -205,27 +205,27 @@ pandas>=2.0.0
 openpyxl>=3.1.0
 ```
 
-### Code-Refactoring
+### Code Refactoring
 
-Die bestehende Logik aus `distribute_stock.py` und `balance_inventory.py` sollte in Klassen/Funktionen refactored werden die:
-- Input DataFrame direkt akzeptieren (nicht Dateipfad)
-- Konfiguration als Parameter akzeptieren (nicht aus config.py importieren)
-- Zwischenschritte als Datenstruktur zurückgeben (für Vorschau)
-- Output als Liste von DataFrames zurückgeben (nicht direkt speichern)
+The existing logic from `distribute_stock.py` and `balance_inventory.py` should be refactored into classes/functions that:
+- Accept input DataFrame directly (not file path)
+- Accept configuration as parameter (not import from config.py)
+- Return intermediate steps as data structure (for preview)
+- Return output as list of DataFrames (not save directly)
 
-**Beispiel Interface:**
+**Example Interface:**
 
 ```python
 class StockDistributor:
     def __init__(self, config: DistributionConfig):
         self.config = config
-    
+
     def preview(self, df: pd.DataFrame) -> list[TransferPreview]:
-        """Generiert Vorschau der Zuweisungen ohne auszuführen"""
+        """Generates preview of assignments without executing"""
         pass
-    
+
     def execute(self, df: pd.DataFrame) -> list[TransferResult]:
-        """Führt Verteilung aus und gibt Ergebnisse zurück"""
+        """Executes distribution and returns results"""
         pass
 
 @dataclass
@@ -245,60 +245,60 @@ class TransferResult:
 
 ---
 
-## Nice-to-Have (später)
+## Nice-to-Have (later)
 
-Diese Features sind optional und können in späteren Iterationen hinzugefügt werden:
+These features are optional and can be added in later iterations:
 
-1. **Proximity-basierte Verteilung**
-   - Nahegelegene Geschäfte bevorzugen
-   - Distanz-Matrix zwischen Geschäften definieren
+1. **Proximity-based Distribution**
+   - Prefer nearby stores
+   - Define distance matrix between stores
 
 2. **History/Audit Log**
-   - Protokoll der ausgeführten Verteilungen
-   - Wer hat wann was verteilt
+   - Log of executed distributions
+   - Who distributed what and when
 
-3. **Automatische Erkennung**
-   - Input-Format automatisch erkennen
-   - Spalten-Mapping UI wenn Format abweicht
+3. **Automatic Detection**
+   - Automatically detect input format
+   - Column mapping UI when format differs
 
 4. **Multi-Language Support**
-   - Deutsch/Russisch/Englisch UI
+   - German/Russian/English UI
 
 ---
 
-## Testdaten
+## Test Data
 
-Die Datei `test_scenarios.xlsx` enthält 8 vordefinierte Testszenarien die alle Edge Cases abdecken:
+The file `test_scenarios.xlsx` contains 8 predefined test scenarios covering all edge cases:
 
-| # | Szenario | Erwartetes Ergebnis |
-|---|----------|---------------------|
-| S1 | Stock=5, alle Geschäfte leer | 5 Geschäfte bekommen je 1 |
-| S2 | Stock=3, manche haben schon | Nur leere bekommen |
-| S3 | Stock=0 | Keine Verteilung |
-| S4 | Alle haben schon 1 | Keine Verteilung |
-| S5 | Ein Geschäft hat >2 | Überschuss wird verteilt |
-| S6 | Mehrere >2 | Höchster Bestand zuerst |
-| S7 | Überschuss, alle voll | Rest geht zu Stock |
-| S8 | Фото склад statt Сток | Funktioniert mit photo flag |
+| # | Scenario | Expected Result |
+|---|----------|-----------------|
+| S1 | Stock=5, all stores empty | 5 stores receive 1 each |
+| S2 | Stock=3, some already have | Only empty ones receive |
+| S3 | Stock=0 | No distribution |
+| S4 | All already have 1 | No distribution |
+| S5 | One store has >2 | Surplus is distributed |
+| S6 | Multiple >2 | Highest inventory first |
+| S7 | Surplus, all full | Remainder goes to Stock |
+| S8 | Photo Stock instead of Stock | Works with photo flag |
 
-Diese Szenarien sollten auch in der App testbar sein (z.B. "Test mit Beispieldaten" Button).
+These scenarios should also be testable in the app (e.g., "Test with example data" button).
 
 ---
 
-## Zusammenfassung Prioritäten
+## Priority Summary
 
 1. **Must Have:**
-   - File Upload + Validierung
-   - Skript-Auswahl (Script 1 / Script 2)
-   - Konfiguration (Prioritäten, Ausschlüsse, Threshold)
-   - Vorschau der Zuweisungen pro Zeile
-   - Download der generierten Dateien
+   - File Upload + Validation
+   - Script selection (Script 1 / Script 2)
+   - Configuration (Priorities, Exclusions, Threshold)
+   - Preview of assignments per row
+   - Download generated files
 
 2. **Should Have:**
    - Progress Bar
-   - Filter/Suche in der Vorschau
+   - Filter/Search in preview
    - Config Export/Import
 
 3. **Nice to Have:**
-   - Proximity-basierte Verteilung
+   - Proximity-based distribution
    - Multi-Language

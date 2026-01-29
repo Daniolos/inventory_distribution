@@ -1,86 +1,86 @@
 # Inventory Distribution Scripts
 
-Zwei Python-Skripte für die automatische Verteilung von Lagerbeständen auf Geschäfte.
+Two Python scripts for automatic inventory distribution to stores.
 
-## Voraussetzungen
+## Prerequisites
 
 - Python 3.8+
 - pandas: `pip install pandas openpyxl`
 
-## Skript 1: Stock → Geschäfte verteilen
+## Script 1: Stock → Stores Distribution
 
-Verteilt Bestände von **Сток** oder **Фото склад** auf Geschäfte die 0 haben.
+Distributes inventory from **Сток** or **Фото склад** to stores with 0 inventory.
 
-### Verwendung
+### Usage
 
 ```bash
-# Von Сток verteilen (Standard)
+# Distribute from Сток (default)
 python distribute_stock.py "data/Остатки + Сезон.xlsx" stock
 
-# Von Фото склад verteilen
+# Distribute from Фото склад
 python distribute_stock.py "data/Остатки + Сезон.xlsx" photo
 ```
 
-### Logik
-- Geht jede Zeile durch
-- Für jedes Geschäft mit Bestand = 0: 1 Stück verteilen
-- Folgt der Prioritätsreihenfolge in `config.py`
-- Respektiert ausgeschlossene Geschäfte
+### Logic
+- Goes through each row
+- For each store with inventory = 0: distribute 1 item
+- Follows the priority order in `config.py`
+- Respects excluded stores
 
 ---
 
-## Skript 2: Bestände ausgleichen
+## Script 2: Balance Inventory
 
-Gleicht Bestände zwischen Geschäften aus.
+Balances inventory between stores.
 
-### Verwendung
+### Usage
 
 ```bash
 python balance_inventory.py "data/Остатки + Сезон.xlsx"
 ```
 
-### Logik
-- Findet Geschäfte mit > 2 Teilen (konfigurierbar)
-- Nimmt vom Geschäft mit den meisten Teilen zuerst
-- Verteilt auf Geschäfte mit 0 Bestand
-- Rest geht zurück ins Stock
+### Logic
+- Finds stores with > 2 items (configurable)
+- Takes from store with the most items first
+- Distributes to stores with 0 inventory
+- Remainder goes back to Stock
 
 ---
 
-## Konfiguration (config.py)
+## Configuration (config.py)
 
 ```python
-# Priorität der Geschäfte (oben = höchste Prio)
+# Store priority (top = highest priority)
 STORE_PRIORITY = [
     "125007 MSK-PC-Гагаринский",
     "125008 MSK-PC-РИО Ленинский",
-    # ... weitere Geschäfte
+    # ... more stores
 ]
 
-# Ausgeschlossene Geschäfte
+# Excluded stores
 EXCLUDED_STORES = [
-    # "125839 - MSK-PC-Outlet Белая Дача",  # Auskommentieren zum Ausschließen
+    # "125839 - MSK-PC-Outlet Белая Дача",  # Uncomment to exclude
 ]
 
-# Schwellwert für Ausgleich (Skript 2)
-BALANCE_THRESHOLD = 2  # Geschäfte mit > 2 Teilen werden ausgeglichen
+# Threshold for balancing (Script 2)
+BALANCE_THRESHOLD = 2  # Stores with > 2 items will be balanced
 ```
 
 ---
 
 ## Output
 
-Alle Output-Dateien werden im `output/` Ordner erstellt:
+All output files are created in the `output/` folder:
 
-- Format: `{Sender}_to_{Empfänger}_{Timestamp}.xlsx`
-- Beispiele:
+- Format: `{Sender}_to_{Receiver}_{Timestamp}.xlsx`
+- Examples:
   - `Сток_to_125007_20260128_143000.xlsx`
   - `125839_to_Сток_20260128_143000.xlsx`
 
-### Output-Spalten
+### Output Columns
 
-| Spalte | Gefüllt |
-|--------|---------|
+| Column | Filled |
+|--------|--------|
 | Артикул | ❌ |
 | Код номенклатуры | ❌ |
 | Номенклатура | ✅ |
@@ -93,8 +93,8 @@ Alle Output-Dateien werden im `output/` Ordner erstellt:
 
 ---
 
-## Zukünftige Erweiterungen
+## Future Enhancements
 
-- [ ] Proximity-basierte Verteilung (nahegelegene Geschäfte bevorzugen)
-- [ ] GUI für einfachere Bedienung
-- [ ] Automatische E-Mail-Benachrichtigung nach Ausführung
+- [ ] Proximity-based distribution (prefer nearby stores)
+- [ ] GUI for easier operation
+- [ ] Automatic email notification after execution
