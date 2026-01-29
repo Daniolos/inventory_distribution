@@ -92,6 +92,18 @@ def validate_file(df: pd.DataFrame) -> tuple[bool, list[str]]:
     return len(errors) == 0, errors
 
 
+def _format_filter_value(val) -> str:
+    """Format a value for display in filter options.
+
+    Converts floats that are whole numbers to integers (e.g., 2221.0 -> "2221").
+    """
+    if pd.isna(val):
+        return ""
+    if isinstance(val, float) and val.is_integer():
+        return str(int(val))
+    return str(val)
+
+
 def render_filters(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
     """Render filter UI and return filtered DataFrame.
 
@@ -113,9 +125,10 @@ def render_filters(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
         filtered_df = df.copy()
 
         if has_collection:
-            # Get unique non-empty values
+            # Get unique non-empty values, formatted as clean strings
             unique_collections = df[COLLECTION_COLUMN].dropna().unique().tolist()
-            unique_collections = [str(v) for v in unique_collections if str(v).strip()]
+            unique_collections = [_format_filter_value(v) for v in unique_collections]
+            unique_collections = [v for v in unique_collections if v.strip()]
             unique_collections.sort()
 
             if unique_collections:
@@ -127,13 +140,15 @@ def render_filters(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
                     help="Leave empty to include all"
                 )
                 if selected_collections:
+                    # Apply same formatting when comparing
                     filtered_df = filtered_df[
-                        filtered_df[COLLECTION_COLUMN].astype(str).isin(selected_collections)
+                        filtered_df[COLLECTION_COLUMN].apply(_format_filter_value).isin(selected_collections)
                     ]
 
         if has_additional_name:
             unique_names = df[ADDITIONAL_NAME_COLUMN].dropna().unique().tolist()
-            unique_names = [str(v) for v in unique_names if str(v).strip()]
+            unique_names = [_format_filter_value(v) for v in unique_names]
+            unique_names = [v for v in unique_names if v.strip()]
             unique_names.sort()
 
             if unique_names:
@@ -145,8 +160,9 @@ def render_filters(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
                     help="Leave empty to include all"
                 )
                 if selected_names:
+                    # Apply same formatting when comparing
                     filtered_df = filtered_df[
-                        filtered_df[ADDITIONAL_NAME_COLUMN].astype(str).isin(selected_names)
+                        filtered_df[ADDITIONAL_NAME_COLUMN].apply(_format_filter_value).isin(selected_names)
                     ]
 
         # Show filter summary
