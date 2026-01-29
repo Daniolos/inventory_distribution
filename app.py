@@ -127,53 +127,52 @@ def render_filters(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
     if not has_collection and not has_additional_name:
         return df
 
-    with st.expander("🔍 Фильтры", expanded=False):
-        filtered_df = df.copy()
+    filtered_df = df.copy()
 
-        if has_collection:
-            # Get unique non-empty values, formatted as clean strings
-            unique_collections = df[COLLECTION_COLUMN].dropna().unique().tolist()
-            unique_collections = [_format_filter_value(v) for v in unique_collections]
-            unique_collections = [v for v in unique_collections if v.strip()]
-            unique_collections.sort()
+    if has_collection:
+        # Get unique non-empty values, formatted as clean strings
+        unique_collections = df[COLLECTION_COLUMN].dropna().unique().tolist()
+        unique_collections = [_format_filter_value(v) for v in unique_collections]
+        unique_collections = [v for v in unique_collections if v.strip()]
+        unique_collections.sort()
 
-            if unique_collections:
-                selected_collections = st.multiselect(
-                    f"Фильтр по {COLLECTION_COLUMN}",
-                    options=unique_collections,
-                    default=[],
-                    key=f"{prefix}_filter_collection",
-                    help="Оставьте пустым, чтобы включить всё"
-                )
-                if selected_collections:
-                    # Apply same formatting when comparing
-                    filtered_df = filtered_df[
-                        filtered_df[COLLECTION_COLUMN].apply(_format_filter_value).isin(selected_collections)
-                    ]
+        if unique_collections:
+            selected_collections = st.multiselect(
+                f"Фильтр по {COLLECTION_COLUMN}",
+                options=unique_collections,
+                default=[],
+                key=f"{prefix}_filter_collection",
+                help="Оставьте пустым, чтобы включить всё"
+            )
+            if selected_collections:
+                # Apply same formatting when comparing
+                filtered_df = filtered_df[
+                    filtered_df[COLLECTION_COLUMN].apply(_format_filter_value).isin(selected_collections)
+                ]
 
-        if has_additional_name:
-            unique_names = df[ADDITIONAL_NAME_COLUMN].dropna().unique().tolist()
-            unique_names = [_format_filter_value(v) for v in unique_names]
-            unique_names = [v for v in unique_names if v.strip()]
-            unique_names.sort()
+    if has_additional_name:
+        unique_names = df[ADDITIONAL_NAME_COLUMN].dropna().unique().tolist()
+        unique_names = [_format_filter_value(v) for v in unique_names]
+        unique_names = [v for v in unique_names if v.strip()]
+        unique_names.sort()
 
-            if unique_names:
-                selected_names = st.multiselect(
-                    f"Фильтр по {ADDITIONAL_NAME_COLUMN}",
-                    options=unique_names,
-                    default=[],
-                    key=f"{prefix}_filter_additional_name",
-                    help="Оставьте пустым, чтобы включить всё"
-                )
-                if selected_names:
-                    # Apply same formatting when comparing
-                    filtered_df = filtered_df[
-                        filtered_df[ADDITIONAL_NAME_COLUMN].apply(_format_filter_value).isin(selected_names)
-                    ]
+        if unique_names:
+            selected_names = st.multiselect(
+                f"Фильтр по {ADDITIONAL_NAME_COLUMN}",
+                options=unique_names,
+                default=[],
+                key=f"{prefix}_filter_additional_name",
+                help="Оставьте пустым, чтобы включить всё"
+            )
+            if selected_names:
+                # Apply same formatting when comparing
+                filtered_df = filtered_df[
+                    filtered_df[ADDITIONAL_NAME_COLUMN].apply(_format_filter_value).isin(selected_names)
+                ]
 
-        # Show filter summary
-        if len(filtered_df) != len(df):
-            st.info(f"Отфильтровано: {len(filtered_df)} из {len(df)} строк")
+    # Show filter summary
+    if len(filtered_df) != len(df):
+        st.info(f"Отфильтровано: {len(filtered_df)} из {len(df)} строк")
 
     return filtered_df
 
