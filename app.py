@@ -373,13 +373,11 @@ with st.sidebar:
             st.session_state.sales_file_name = sales_file.name
 
             # Show summary
-            st.success(f"Найдено {len(sales_data.products)} уникальных артикулов")
-
-            # Show sample
-            with st.expander("Примеры загруженных артикулов", expanded=False):
-                sample_products = list(sales_data.products.values())[:3]
-                for p in sample_products:
-                    st.markdown(f"**{p.product_code}**: {len(p.store_sales)} магазинов")
+            all_stores = set()
+            for p in sales_data.products.values():
+                for s in p.store_sales:
+                    all_stores.add(s.store_id)
+            st.success(f"Найдено {len(sales_data.products)} артикулов, {len(all_stores)} магазинов")
 
         except Exception as e:
             st.error(f"Ошибка разбора файла: {e}")

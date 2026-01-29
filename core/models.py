@@ -9,14 +9,18 @@ import pandas as pd
 def extract_store_id(store_name: str) -> Optional[int]:
     """
     Extract numeric store ID from store name.
-    Handles leading zeros.
+    Handles leading zeros. Only matches valid store format.
 
+    Valid format: 5-7 digit ID followed by space and store name
     Example: "0130143 MSK-PCM-Мега 2 Химки" -> 130143
     Example: "125007 MSK-PC-Гагаринский" -> 125007
+
+    Returns None for non-store rows like headers or totals.
     """
     if not store_name:
         return None
-    match = re.match(r"^0*(\d+)", str(store_name))
+    # Match store format: 5-7 digits (with optional leading zeros) followed by space and name
+    match = re.match(r"^0*(\d{5,7})\s+\S", str(store_name))
     if match:
         return int(match.group(1))
     return None

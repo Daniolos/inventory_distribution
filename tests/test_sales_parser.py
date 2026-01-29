@@ -75,6 +75,18 @@ class TestExtractStoreId:
         assert extract_store_id(None) is None
         assert extract_store_id("_C5 21354.2110/1010_") is None
 
+    def test_extract_rejects_non_store_rows(self):
+        """Test that header/metadata rows are not matched as stores."""
+        # Too few digits
+        assert extract_store_id("123 Something") is None
+        assert extract_store_id("1234 Something") is None
+        # No space after digits
+        assert extract_store_id("125007") is None
+        # Header rows from Excel
+        assert extract_store_id("Итого") is None
+        assert extract_store_id("Номенклатура") is None
+        assert extract_store_id("Склад") is None
+
 
 class TestBuildStoreIdMap:
     """Tests for building store ID map."""
