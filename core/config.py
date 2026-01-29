@@ -31,9 +31,6 @@ VARIANT_COLUMN = "Характеристика"
 COLLECTION_COLUMN = "Коллекция (сезон)"
 ADDITIONAL_NAME_COLUMN = "Наименование_доп"
 
-# Input file settings
-INPUT_HEADER_ROW = 6  # 0-indexed (row 7 in Excel)
-
 # Output columns for transfer files
 OUTPUT_COLUMNS = [
     "Артикул",

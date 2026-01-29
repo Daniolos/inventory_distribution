@@ -59,9 +59,6 @@ class DistributionConfig:
     product_name_column: str = "Номенклатура"
     variant_column: str = "Характеристика"
 
-    # Input settings
-    input_header_row: int = 6  # 0-indexed (row 7 in Excel)
-
     @property
     def active_stores(self) -> list[str]:
         """Get stores that are not excluded."""
