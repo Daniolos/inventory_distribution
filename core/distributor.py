@@ -144,12 +144,16 @@ class StockDistributor:
         for product, data in product_data.items():
             sizes_in_stock = data["sizes_in_stock"]
             available_sizes_count = len(sizes_in_stock)
+            total_product_sizes = len(data["rows"])  # All sizes of this product
 
             for store in active_stores:
                 store_sizes_count = self._get_store_sizes_count(data["rows"], store)
 
                 # Determine which rule to apply
-                if store_sizes_count <= 1:
+                # Minimum sizes rule only applies if:
+                # 1. Store has <= 1 sizes of this product
+                # 2. Product has at least 4 sizes total (otherwise use normal distribution)
+                if store_sizes_count <= 1 and total_product_sizes >= 4:
                     # Rule: Need 3 different sizes, "all or nothing"
                     if available_sizes_count < MIN_SIZES_TO_ADD:
                         # Not enough sizes in stock, skip this product/store
