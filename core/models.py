@@ -2,7 +2,131 @@
 
 from dataclasses import dataclass, field
 from typing import Optional
+import re
 import pandas as pd
+
+
+def extract_store_id(store_name: str) -> Optional[int]:
+    """
+    Extract numeric store ID from store name.
+    Handles leading zeros.
+
+    Example: "0130143 MSK-PCM-Мега 2 Химки" -> 130143
+    Example: "125007 MSK-PC-Гагаринский" -> 125007
+    """
+    if not store_name:
+        return None
+    match = re.match(r"^0*(\d+)", str(store_name))
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def build_store_id_map(store_names: list[str]) -> dict[int, str]:
+    """
+    Build mapping from store ID to full store name.
+
+    Args:
+        store_names: List of store names (from config.store_priority)
+
+    Returns:
+        Dict mapping store_id (int) to full store name
+    """
+    result = {}
+    for name in store_names:
+        store_id = extract_store_id(name)
+        if store_id:
+            result[store_id] = name
+    return result
+
+
+@dataclass
+class StoreSales:
+    """Sales data for a single store for a specific product."""
+    store_id: int          # Numeric ID (e.g., 130143)
+    store_name: str        # Full name from sales file
+    quantity: int          # Sales quantity
+
+
+@dataclass
+class ProductSalesData:
+    """Sales data for a single product across all stores."""
+    product_code: str      # e.g., "C5 21354.2110/1010"
+    raw_name: str          # Original name from sales file
+    total_quantity: int    # Total sales across all stores
+    store_sales: list[StoreSales] = field(default_factory=list)
+
+    def get_priority_order(
+        self,
+        fallback_priority: list[str],
+        store_id_map: dict[int, str]
+    ) -> list[str]:
+        """
+        Get store names ordered by sales (descending).
+        Ties broken by fallback_priority order.
+
+        Args:
+            fallback_priority: User-configured static priority list
+            store_id_map: Mapping from store_id (int) to full store name
+
+        Returns:
+            List of store names in priority order (highest sales first)
+        """
+        def sort_key(store_sale: StoreSales) -> tuple:
+            # Get the canonical store name from our map
+            store_name = store_id_map.get(store_sale.store_id, "")
+            # Find position in fallback priority (for tiebreaker)
+            fallback_idx = (
+                fallback_priority.index(store_name)
+                if store_name in fallback_priority
+                else len(fallback_priority)
+            )
+            # Sort by: sales descending (-quantity), then fallback position ascending
+            return (-store_sale.quantity, fallback_idx)
+
+        sorted_sales = sorted(self.store_sales, key=sort_key)
+
+        # Return store names from our canonical map
+        result = []
+        for s in sorted_sales:
+            store_name = store_id_map.get(s.store_id)
+            if store_name:
+                result.append(store_name)
+        return result
+
+
+@dataclass
+class SalesPriorityData:
+    """Container for all sales priority data."""
+    products: dict[str, ProductSalesData] = field(default_factory=dict)  # key = product_code
+
+    def get_product_priority(
+        self,
+        product_code: str,
+        fallback_priority: list[str],
+        store_id_map: dict[int, str]
+    ) -> tuple[list[str], bool]:
+        """
+        Get store priority for a specific product.
+
+        Args:
+            product_code: Extracted product code
+            fallback_priority: User-configured static priority
+            store_id_map: Mapping from store_id to full store name
+
+        Returns:
+            Tuple of (priority_list, was_found_in_sales_data)
+            - If found: (sales-based priority, True)
+            - If not found: (fallback_priority, False)
+        """
+        if product_code in self.products:
+            priority = self.products[product_code].get_priority_order(
+                fallback_priority, store_id_map
+            )
+            # If sales data exists but resulted in empty list, use fallback
+            if priority:
+                return priority, True
+        return fallback_priority, False
 
 
 @dataclass
@@ -24,6 +148,7 @@ class TransferPreview:
     # Per-row status indicators
     skip_reason: Optional[str] = None  # e.g., "min_sizes_not_met"
     uses_standard_distribution: bool = False  # Product has <4 sizes
+    uses_fallback_priority: bool = False  # Product not found in sales data
 
     @property
     def total_quantity(self) -> int:
@@ -44,6 +169,11 @@ class TransferPreview:
     def has_info(self) -> bool:
         """Whether this row has an info status."""
         return self.uses_standard_distribution
+
+    @property
+    def has_fallback_priority(self) -> bool:
+        """Whether this row uses fallback priority (not found in sales data)."""
+        return self.uses_fallback_priority
 
 
 

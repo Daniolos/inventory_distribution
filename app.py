@@ -16,6 +16,7 @@ from core import (
     DistributionConfig,
     TransferPreview,
     TransferResult,
+    parse_sales_file,
 )
 from core.config import (
     DEFAULT_STORE_PRIORITY,
@@ -52,6 +53,11 @@ if "preview_results_script2" not in st.session_state:
     st.session_state.preview_results_script2 = None
 if "transfer_results_script2" not in st.session_state:
     st.session_state.transfer_results_script2 = None
+# Sales priority data
+if "sales_priority_data" not in st.session_state:
+    st.session_state.sales_priority_data = None
+if "sales_file_name" not in st.session_state:
+    st.session_state.sales_file_name = None
 
 
 def move_store_up(idx: int):
@@ -226,12 +232,22 @@ def render_preview(previews: list[TransferPreview], prefix: str = "default"):
     rows_with_transfers = sum(1 for p in previews if p.has_transfers)
     total_transfers = sum(len(p.transfers) for p in previews)
     total_quantity = sum(p.total_quantity for p in previews)
+    fallback_count = sum(1 for p in previews if p.uses_fallback_priority and p.has_transfers)
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Всего строк", total_rows)
-    col2.metric("Строк с перемещениями", rows_with_transfers)
-    col3.metric("Перемещения", total_transfers)
-    col4.metric("Всего единиц", total_quantity)
+    # Show metrics - add extra column if sales data is active
+    if st.session_state.sales_priority_data:
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("Всего строк", total_rows)
+        col2.metric("Строк с перемещениями", rows_with_transfers)
+        col3.metric("Перемещения", total_transfers)
+        col4.metric("Всего единиц", total_quantity)
+        col5.metric("📊 Без данных продаж", fallback_count)
+    else:
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Всего строк", total_rows)
+        col2.metric("Строк с перемещениями", rows_with_transfers)
+        col3.metric("Перемещения", total_transfers)
+        col4.metric("Всего единиц", total_quantity)
 
     # Filter options
     show_only_transfers = st.checkbox(
@@ -248,10 +264,12 @@ def render_preview(previews: list[TransferPreview], prefix: str = "default"):
 
         displayed += 1
         variant_text = f" / {preview.variant}" if preview.variant else ""
-        
-        # Determine row icon based on status
+
+        # Determine row icon based on status (priority: warning > fallback > info)
         if preview.has_warning:
             row_icon = "⚠️"  # Warning - skipped due to min-sizes rule
+        elif preview.uses_fallback_priority:
+            row_icon = "📊"  # Fallback - product not found in sales data
         elif preview.has_info:
             row_icon = "ℹ️"  # Info - using standard distribution (<4 sizes)
         else:
@@ -261,6 +279,8 @@ def render_preview(previews: list[TransferPreview], prefix: str = "default"):
             header = f"{row_icon} Строка {preview.row_index}: {preview.product_name}{variant_text} ({len(preview.transfers)} перемещений)"
             with st.expander(header.strip(), expanded=False):
                 # Show status reason if applicable
+                if preview.uses_fallback_priority:
+                    st.caption("📊 Товар не найден в данных продаж — используется статический приоритет")
                 if preview.uses_standard_distribution:
                     st.caption("ℹ️ <4 размеров — стандартное распределение")
                 for transfer in preview.transfers:
@@ -335,9 +355,49 @@ st.markdown("Распределение товаров по магазинам")
 with st.sidebar:
     st.header("⚙️ Настройки")
 
-    # Store priority editor
-    st.subheader("Порядок приоритета")
-    st.caption("Магазины сверху получают товары первыми")
+    # Sales priority upload (FIRST - most important)
+    st.subheader("📊 Приоритет по продажам")
+    st.caption("Приоритет магазинов определяется по количеству проданных единиц каждого товара")
+
+    sales_file = st.file_uploader(
+        "Загрузить файл продаж",
+        type=["xlsx"],
+        key="sales_priority_file",
+        help="Excel с данными продаж по магазинам. Магазин с наибольшими продажами получает приоритет 1."
+    )
+
+    if sales_file:
+        try:
+            sales_data = parse_sales_file(sales_file)
+            st.session_state.sales_priority_data = sales_data
+            st.session_state.sales_file_name = sales_file.name
+
+            # Show summary
+            st.success(f"Найдено {len(sales_data.products)} уникальных артикулов")
+
+            # Show sample
+            with st.expander("Примеры загруженных артикулов", expanded=False):
+                sample_products = list(sales_data.products.values())[:3]
+                for p in sample_products:
+                    st.markdown(f"**{p.product_code}**: {len(p.store_sales)} магазинов")
+
+        except Exception as e:
+            st.error(f"Ошибка разбора файла: {e}")
+    else:
+        # File removed (X clicked) - clear session state
+        if st.session_state.sales_priority_data is not None:
+            st.session_state.sales_priority_data = None
+            st.session_state.sales_file_name = None
+
+    # Show status when no file loaded
+    if not st.session_state.sales_priority_data:
+        st.caption("⚠️ Файл не загружен — используется статический приоритет (см. ниже)")
+
+    st.divider()
+
+    # Store priority editor (fallback/tiebreaker)
+    st.subheader("Статический приоритет")
+    st.caption("Используется как запасной вариант или при равных продажах")
 
     for idx, store in enumerate(st.session_state.store_priority):
         col1, col2, col3, col4 = st.columns([1, 6, 1, 1])
@@ -422,7 +482,10 @@ with tab1:
 
                     if col1.button("Предпросмотр", key="preview_script1", type="secondary"):
                         config = get_config()
-                        distributor = StockDistributor(config)
+                        distributor = StockDistributor(
+                            config,
+                            sales_data=st.session_state.sales_priority_data
+                        )
 
                         with st.spinner("Генерация предпросмотра..."):
                             st.session_state.preview_results_script1 = distributor.preview(df_filtered, source, header_row)
@@ -430,7 +493,10 @@ with tab1:
 
                     if col2.button("Создать перемещения", key="execute_script1", type="primary"):
                         config = get_config()
-                        distributor = StockDistributor(config)
+                        distributor = StockDistributor(
+                            config,
+                            sales_data=st.session_state.sales_priority_data
+                        )
 
                         with st.spinner("Создание перемещений..."):
                             st.session_state.transfer_results_script1 = distributor.execute(df_filtered, source, header_row)
@@ -502,7 +568,10 @@ with tab2:
 
                     if col1.button("Предпросмотр", key="preview_script2", type="secondary"):
                         config = get_config()
-                        balancer = InventoryBalancer(config)
+                        balancer = InventoryBalancer(
+                            config,
+                            sales_data=st.session_state.sales_priority_data
+                        )
 
                         with st.spinner("Генерация предпросмотра..."):
                             st.session_state.preview_results_script2 = balancer.preview(df2_filtered, header_row)
@@ -510,7 +579,10 @@ with tab2:
 
                     if col2.button("Создать перемещения", key="execute_script2", type="primary"):
                         config = get_config()
-                        balancer = InventoryBalancer(config)
+                        balancer = InventoryBalancer(
+                            config,
+                            sales_data=st.session_state.sales_priority_data
+                        )
 
                         with st.spinner("Создание перемещений..."):
                             st.session_state.transfer_results_script2 = balancer.execute(df2_filtered, header_row)

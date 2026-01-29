@@ -5,7 +5,15 @@ from datetime import datetime
 from typing import Optional
 from collections import defaultdict
 
-from .models import Transfer, TransferPreview, TransferResult, DistributionConfig
+from .models import (
+    Transfer,
+    TransferPreview,
+    TransferResult,
+    DistributionConfig,
+    SalesPriorityData,
+    build_store_id_map,
+)
+from .sales_parser import extract_product_code_from_input
 from .config import OUTPUT_COLUMNS
 
 # Minimum sizes rule configuration
@@ -32,8 +40,61 @@ class StockDistributor:
     - If store has 2+ sizes of a product: normal distribution (1 item per variant with 0 stock)
     """
 
-    def __init__(self, config: DistributionConfig):
+    def __init__(
+        self,
+        config: DistributionConfig,
+        sales_data: Optional[SalesPriorityData] = None
+    ):
         self.config = config
+        self.sales_data = sales_data
+        # Build store ID to name mapping for matching sales data
+        self._store_id_map = build_store_id_map(config.store_priority)
+
+    def _get_product_priority(
+        self,
+        product_name: str,
+        available_stores: list[str]
+    ) -> tuple[list[str], bool]:
+        """
+        Get store priority for a specific product.
+
+        Args:
+            product_name: Product name from Номенклатура column
+            available_stores: List of stores that exist in the DataFrame
+
+        Returns:
+            Tuple of (active_store_list_in_priority_order, uses_fallback)
+        """
+        # Default: use static priority
+        fallback_priority = [s for s in self.config.active_stores if s in available_stores]
+
+        if not self.sales_data:
+            return fallback_priority, False
+
+        # Extract product code from input file format
+        product_code = extract_product_code_from_input(product_name)
+        if not product_code:
+            return fallback_priority, True
+
+        # Look up in sales data
+        priority, found = self.sales_data.get_product_priority(
+            product_code,
+            self.config.store_priority,
+            self._store_id_map
+        )
+
+        if not found:
+            return fallback_priority, True
+
+        # Filter to available stores only and maintain sales-based order
+        active_priority = [s for s in priority if s in available_stores and s in self.config.active_stores]
+
+        # Add any stores that weren't in sales data but are in available/active
+        for store in fallback_priority:
+            if store not in active_priority:
+                active_priority.append(store)
+
+        return active_priority, False
 
     def _get_source_column(self, source: str) -> str:
         """Get the column name for the source."""
@@ -123,14 +184,14 @@ class StockDistributor:
         df_filtered = df[df[self.config.product_name_column].notna()].copy()
         df_filtered = df_filtered[df_filtered[self.config.product_name_column] != ""]
 
-        # Get active stores that exist in the DataFrame
-        active_stores = [
-            s for s in self.config.active_stores
+        # Get all stores that exist in the DataFrame (for analysis)
+        available_stores = [
+            s for s in self.config.store_priority
             if s in df_filtered.columns
         ]
 
-        # Analyze inventory by product
-        product_data = self._analyze_product_inventory(df_filtered, source_column, active_stores, header_row)
+        # Analyze inventory by product (using all available stores for quantity tracking)
+        product_data = self._analyze_product_inventory(df_filtered, source_column, available_stores, header_row)
 
         # Track remaining stock per row (to avoid double-allocation)
         remaining_stock = {}
@@ -140,22 +201,29 @@ class StockDistributor:
 
         # Create previews for all rows
         previews_dict = {}
-        
+
         # Track which products have <4 sizes for per-row status
         products_under_4_sizes = set()
         # Track rows skipped due to min-sizes rule: {original_idx: skip_reason}
         skipped_rows_reasons = {}
+        # Track products using fallback priority (not found in sales data)
+        products_using_fallback = set()
 
         for product, data in product_data.items():
             sizes_in_stock = data["sizes_in_stock"]
             available_sizes_count = len(sizes_in_stock)
             total_product_sizes = len(data["rows"])  # All sizes of this product
-            
+
             # Track products with <4 sizes (for per-row status)
             if total_product_sizes < 4:
                 products_under_4_sizes.add(product)
 
-            for store in active_stores:
+            # Get product-specific store priority
+            product_stores, uses_fallback = self._get_product_priority(product, available_stores)
+            if uses_fallback and self.sales_data:
+                products_using_fallback.add(product)
+
+            for store in product_stores:
                 store_sizes_count = self._get_store_sizes_count(data["rows"], store)
 
                 # Determine which rule to apply
@@ -236,10 +304,14 @@ class StockDistributor:
             # Check if this row was skipped due to min-sizes rule
             if original_idx in skipped_rows_reasons:
                 preview.skip_reason = skipped_rows_reasons[original_idx]
-            
+
             # Check if this product has <4 sizes (uses standard distribution)
             if preview.product_name in products_under_4_sizes:
                 preview.uses_standard_distribution = True
+
+            # Check if this product uses fallback priority (not found in sales data)
+            if preview.product_name in products_using_fallback:
+                preview.uses_fallback_priority = True
 
         # Sort by row index and return
         previews = sorted(previews_dict.values(), key=lambda p: p.row_index)
