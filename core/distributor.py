@@ -140,11 +140,20 @@ class StockDistributor:
 
         # Create previews for all rows
         previews_dict = {}
+        
+        # Track which products have <4 sizes for per-row status
+        products_under_4_sizes = set()
+        # Track rows skipped due to min-sizes rule: {original_idx: skip_reason}
+        skipped_rows_reasons = {}
 
         for product, data in product_data.items():
             sizes_in_stock = data["sizes_in_stock"]
             available_sizes_count = len(sizes_in_stock)
             total_product_sizes = len(data["rows"])  # All sizes of this product
+            
+            # Track products with <4 sizes (for per-row status)
+            if total_product_sizes < 4:
+                products_under_4_sizes.add(product)
 
             for store in active_stores:
                 store_sizes_count = self._get_store_sizes_count(data["rows"], store)
@@ -157,6 +166,11 @@ class StockDistributor:
                     # Rule: Need 3 different sizes, "all or nothing"
                     if available_sizes_count < MIN_SIZES_TO_ADD:
                         # Not enough sizes in stock, skip this product/store
+                        # Mark rows with skip reason
+                        for row_data in data["rows"]:
+                            if row_data["store_quantities"].get(store, 0) == 0:
+                                if row_data["original_idx"] not in skipped_rows_reasons:
+                                    skipped_rows_reasons[row_data["original_idx"]] = f"Недостаточно размеров (есть {available_sizes_count}, нужно ≥3)"
                         continue
 
                     # Find rows with stock that store doesn't have
@@ -216,6 +230,16 @@ class StockDistributor:
                         product_name=product,
                         variant=row_data["variant"],
                     )
+
+        # Set per-row status fields
+        for original_idx, preview in previews_dict.items():
+            # Check if this row was skipped due to min-sizes rule
+            if original_idx in skipped_rows_reasons:
+                preview.skip_reason = skipped_rows_reasons[original_idx]
+            
+            # Check if this product has <4 sizes (uses standard distribution)
+            if preview.product_name in products_under_4_sizes:
+                preview.uses_standard_distribution = True
 
         # Sort by row index and return
         previews = sorted(previews_dict.values(), key=lambda p: p.row_index)

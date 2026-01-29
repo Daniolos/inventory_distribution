@@ -215,7 +215,7 @@ def get_config() -> DistributionConfig:
 
 
 def render_preview(previews: list[TransferPreview], prefix: str = "default"):
-    """Render the preview section.
+    """Render the preview section with per-row status icons.
 
     Args:
         previews: List of transfer previews to display
@@ -248,21 +248,36 @@ def render_preview(previews: list[TransferPreview], prefix: str = "default"):
 
         displayed += 1
         variant_text = f" / {preview.variant}" if preview.variant else ""
+        
+        # Determine row icon based on status
+        if preview.has_warning:
+            row_icon = "⚠️"  # Warning - skipped due to min-sizes rule
+        elif preview.has_info:
+            row_icon = "ℹ️"  # Info - using standard distribution (<4 sizes)
+        else:
+            row_icon = ""
 
         if preview.has_transfers:
-            with st.expander(
-                f"Строка {preview.row_index}: {preview.product_name}{variant_text} "
-                f"({len(preview.transfers)} перемещений)",
-                expanded=False
-            ):
+            header = f"{row_icon} Строка {preview.row_index}: {preview.product_name}{variant_text} ({len(preview.transfers)} перемещений)"
+            with st.expander(header.strip(), expanded=False):
+                # Show status reason if applicable
+                if preview.uses_standard_distribution:
+                    st.caption("ℹ️ <4 размеров — стандартное распределение")
                 for transfer in preview.transfers:
                     receiver_display = transfer.receiver.split()[0] if transfer.receiver != "Сток" else "Сток"
                     st.markdown(f"  └─ **{transfer.sender}** → **{receiver_display}**: {transfer.quantity} шт.")
         else:
-            st.markdown(
-                f"**Строка {preview.row_index}:** {preview.product_name}{variant_text} "
-                f"— *(нет распределения)*"
-            )
+            # No transfers - show reason
+            if preview.skip_reason:
+                st.markdown(
+                    f"⚠️ **Строка {preview.row_index}:** {preview.product_name}{variant_text} "
+                    f"— *{preview.skip_reason}*"
+                )
+            else:
+                st.markdown(
+                    f"**Строка {preview.row_index}:** {preview.product_name}{variant_text} "
+                    f"— *(нет распределения)*"
+                )
 
     if displayed == 0:
         st.info("Нет перемещений для текущих настроек.")
@@ -424,7 +439,10 @@ with tab1:
                     if st.session_state.preview_results_script1 and not st.session_state.transfer_results_script1:
                         st.divider()
                         st.subheader("Предпросмотр")
-                        render_preview(st.session_state.preview_results_script1, prefix="script1")
+                        render_preview(
+                            st.session_state.preview_results_script1, 
+                            prefix="script1"
+                        )
 
                     if st.session_state.transfer_results_script1:
                         st.divider()
@@ -501,7 +519,10 @@ with tab2:
                     if st.session_state.preview_results_script2 and not st.session_state.transfer_results_script2:
                         st.divider()
                         st.subheader("Предпросмотр")
-                        render_preview(st.session_state.preview_results_script2, prefix="script2")
+                        render_preview(
+                            st.session_state.preview_results_script2, 
+                            prefix="script2"
+                        )
 
                     if st.session_state.transfer_results_script2:
                         st.divider()

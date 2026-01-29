@@ -20,6 +20,10 @@ class TransferPreview:
     product_name: str
     variant: str
     transfers: list[Transfer] = field(default_factory=list)
+    
+    # Per-row status indicators
+    skip_reason: Optional[str] = None  # e.g., "min_sizes_not_met"
+    uses_standard_distribution: bool = False  # Product has <4 sizes
 
     @property
     def total_quantity(self) -> int:
@@ -30,6 +34,19 @@ class TransferPreview:
     def has_transfers(self) -> bool:
         """Whether this row has any transfers."""
         return len(self.transfers) > 0
+    
+    @property
+    def has_warning(self) -> bool:
+        """Whether this row has a warning status."""
+        return self.skip_reason is not None
+    
+    @property
+    def has_info(self) -> bool:
+        """Whether this row has an info status."""
+        return self.uses_standard_distribution
+
+
+
 
 
 @dataclass
