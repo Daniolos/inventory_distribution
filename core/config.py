@@ -27,6 +27,10 @@ PHOTO_STOCK_COLUMN = "Фото склад"
 PRODUCT_NAME_COLUMN = "Номенклатура"
 VARIANT_COLUMN = "Характеристика"
 
+# Filter columns (optional, used for filtering rows before processing)
+COLLECTION_COLUMN = "Коллекция (сезон)"
+ADDITIONAL_NAME_COLUMN = "Наименование_доп"
+
 # Input file settings
 INPUT_HEADER_ROW = 6  # 0-indexed (row 7 in Excel)
 

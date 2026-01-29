@@ -21,11 +21,12 @@ from core.config import (
     DEFAULT_STORE_PRIORITY,
     DEFAULT_EXCLUDED_STORES,
     DEFAULT_BALANCE_THRESHOLD,
-    INPUT_HEADER_ROW,
     PRODUCT_NAME_COLUMN,
     VARIANT_COLUMN,
     STOCK_COLUMN,
     PHOTO_STOCK_COLUMN,
+    COLLECTION_COLUMN,
+    ADDITIONAL_NAME_COLUMN,
 )
 
 # Page config
@@ -42,10 +43,15 @@ if "excluded_stores" not in st.session_state:
     st.session_state.excluded_stores = DEFAULT_EXCLUDED_STORES.copy()
 if "balance_threshold" not in st.session_state:
     st.session_state.balance_threshold = DEFAULT_BALANCE_THRESHOLD
-if "preview_results" not in st.session_state:
-    st.session_state.preview_results = None
-if "transfer_results" not in st.session_state:
-    st.session_state.transfer_results = None
+# Separate session states for each tab to avoid duplicate widget IDs
+if "preview_results_script1" not in st.session_state:
+    st.session_state.preview_results_script1 = None
+if "transfer_results_script1" not in st.session_state:
+    st.session_state.transfer_results_script1 = None
+if "preview_results_script2" not in st.session_state:
+    st.session_state.preview_results_script2 = None
+if "transfer_results_script2" not in st.session_state:
+    st.session_state.transfer_results_script2 = None
 
 
 def move_store_up(idx: int):
@@ -86,6 +92,103 @@ def validate_file(df: pd.DataFrame) -> tuple[bool, list[str]]:
     return len(errors) == 0, errors
 
 
+def render_filters(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
+    """Render filter UI and return filtered DataFrame.
+
+    Args:
+        df: Input DataFrame
+        prefix: Unique prefix for widget keys
+
+    Returns:
+        Filtered DataFrame
+    """
+    # Check which filter columns are available
+    has_collection = COLLECTION_COLUMN in df.columns
+    has_additional_name = ADDITIONAL_NAME_COLUMN in df.columns
+
+    if not has_collection and not has_additional_name:
+        return df
+
+    with st.expander("🔍 Filter Options", expanded=False):
+        filtered_df = df.copy()
+
+        if has_collection:
+            # Get unique non-empty values
+            unique_collections = df[COLLECTION_COLUMN].dropna().unique().tolist()
+            unique_collections = [str(v) for v in unique_collections if str(v).strip()]
+            unique_collections.sort()
+
+            if unique_collections:
+                selected_collections = st.multiselect(
+                    f"Filter by {COLLECTION_COLUMN}",
+                    options=unique_collections,
+                    default=[],
+                    key=f"{prefix}_filter_collection",
+                    help="Leave empty to include all"
+                )
+                if selected_collections:
+                    filtered_df = filtered_df[
+                        filtered_df[COLLECTION_COLUMN].astype(str).isin(selected_collections)
+                    ]
+
+        if has_additional_name:
+            unique_names = df[ADDITIONAL_NAME_COLUMN].dropna().unique().tolist()
+            unique_names = [str(v) for v in unique_names if str(v).strip()]
+            unique_names.sort()
+
+            if unique_names:
+                selected_names = st.multiselect(
+                    f"Filter by {ADDITIONAL_NAME_COLUMN}",
+                    options=unique_names,
+                    default=[],
+                    key=f"{prefix}_filter_additional_name",
+                    help="Leave empty to include all"
+                )
+                if selected_names:
+                    filtered_df = filtered_df[
+                        filtered_df[ADDITIONAL_NAME_COLUMN].astype(str).isin(selected_names)
+                    ]
+
+        # Show filter summary
+        if len(filtered_df) != len(df):
+            st.info(f"Filtered: {len(filtered_df)} of {len(df)} rows")
+
+    return filtered_df
+
+
+def find_header_row(file, max_rows: int = 20) -> tuple[int | None, str | None]:
+    """Automatically find the header row by searching for the product name column.
+
+    Args:
+        file: Uploaded file object
+        max_rows: Maximum rows to search
+
+    Returns:
+        Tuple of (header_row_index, error_message)
+        If found: (row_index, None)
+        If not found: (None, error_message)
+    """
+    try:
+        # Read first max_rows without header
+        preview_df = pd.read_excel(file, header=None, nrows=max_rows)
+
+        # Search for the row containing the product name column
+        for idx, row in preview_df.iterrows():
+            row_values = [str(v) for v in row.values if pd.notna(v)]
+            if PRODUCT_NAME_COLUMN in row_values:
+                # Reset file pointer for subsequent reads
+                file.seek(0)
+                return int(idx), None
+
+        # Not found
+        file.seek(0)
+        return None, f"Header row with '{PRODUCT_NAME_COLUMN}' not found in first {max_rows} rows"
+
+    except Exception as e:
+        file.seek(0)
+        return None, f"Error reading file: {e}"
+
+
 def get_config() -> DistributionConfig:
     """Create config from current session state."""
     return DistributionConfig(
@@ -95,8 +198,13 @@ def get_config() -> DistributionConfig:
     )
 
 
-def render_preview(previews: list[TransferPreview]):
-    """Render the preview section."""
+def render_preview(previews: list[TransferPreview], prefix: str = "default"):
+    """Render the preview section.
+
+    Args:
+        previews: List of transfer previews to display
+        prefix: Unique prefix for widget keys to avoid duplicate IDs
+    """
     # Summary
     total_rows = len(previews)
     rows_with_transfers = sum(1 for p in previews if p.has_transfers)
@@ -110,7 +218,11 @@ def render_preview(previews: list[TransferPreview]):
     col4.metric("Total Units", total_quantity)
 
     # Filter options
-    show_only_transfers = st.checkbox("Show only rows with transfers", value=True)
+    show_only_transfers = st.checkbox(
+        "Show only rows with transfers",
+        value=True,
+        key=f"{prefix}_show_only_transfers"
+    )
 
     # Display previews
     displayed = 0
@@ -256,43 +368,52 @@ with tab1:
 
     if uploaded_file:
         try:
-            df = pd.read_excel(uploaded_file, header=INPUT_HEADER_ROW)
-            st.success(f"File loaded: {len(df)} rows")
-
-            # Validate
-            is_valid, errors = validate_file(df)
-            if not is_valid:
-                for error in errors:
-                    st.error(error)
+            # Auto-detect header row
+            header_row, header_error = find_header_row(uploaded_file)
+            if header_error:
+                st.error(header_error)
+                st.info(f"Tip: Ensure the Excel file has '{PRODUCT_NAME_COLUMN}' as a column header.")
             else:
-                # Preview button
-                col1, col2 = st.columns(2)
+                df = pd.read_excel(uploaded_file, header=header_row)
+                st.success(f"File loaded: {len(df)} rows (header found in row {header_row + 1})")
 
-                if col1.button("Generate Preview", key="preview_script1", type="secondary"):
-                    config = get_config()
-                    distributor = StockDistributor(config)
+                # Validate
+                is_valid, errors = validate_file(df)
+                if not is_valid:
+                    for error in errors:
+                        st.error(error)
+                else:
+                    # Apply filters
+                    df_filtered = render_filters(df, prefix="script1")
 
-                    with st.spinner("Generating preview..."):
-                        st.session_state.preview_results = distributor.preview(df, source)
-                        st.session_state.transfer_results = None
+                    # Preview button
+                    col1, col2 = st.columns(2)
 
-                if col2.button("Generate Transfers", key="execute_script1", type="primary"):
-                    config = get_config()
-                    distributor = StockDistributor(config)
+                    if col1.button("Generate Preview", key="preview_script1", type="secondary"):
+                        config = get_config()
+                        distributor = StockDistributor(config)
 
-                    with st.spinner("Generating transfers..."):
-                        st.session_state.transfer_results = distributor.execute(df, source)
+                        with st.spinner("Generating preview..."):
+                            st.session_state.preview_results_script1 = distributor.preview(df_filtered, source)
+                            st.session_state.transfer_results_script1 = None
 
-                # Display results
-                if st.session_state.preview_results and not st.session_state.transfer_results:
-                    st.divider()
-                    st.subheader("Preview")
-                    render_preview(st.session_state.preview_results)
+                    if col2.button("Generate Transfers", key="execute_script1", type="primary"):
+                        config = get_config()
+                        distributor = StockDistributor(config)
 
-                if st.session_state.transfer_results:
-                    st.divider()
-                    st.subheader("Downloads")
-                    render_results(st.session_state.transfer_results)
+                        with st.spinner("Generating transfers..."):
+                            st.session_state.transfer_results_script1 = distributor.execute(df_filtered, source)
+
+                    # Display results
+                    if st.session_state.preview_results_script1 and not st.session_state.transfer_results_script1:
+                        st.divider()
+                        st.subheader("Preview")
+                        render_preview(st.session_state.preview_results_script1, prefix="script1")
+
+                    if st.session_state.transfer_results_script1:
+                        st.divider()
+                        st.subheader("Downloads")
+                        render_results(st.session_state.transfer_results_script1)
 
         except Exception as e:
             st.error(f"Error loading file: {e}")
@@ -324,43 +445,52 @@ with tab2:
 
     if uploaded_file2:
         try:
-            df2 = pd.read_excel(uploaded_file2, header=INPUT_HEADER_ROW)
-            st.success(f"File loaded: {len(df2)} rows")
-
-            # Validate
-            is_valid, errors = validate_file(df2)
-            if not is_valid:
-                for error in errors:
-                    st.error(error)
+            # Auto-detect header row
+            header_row, header_error = find_header_row(uploaded_file2)
+            if header_error:
+                st.error(header_error)
+                st.info(f"Tip: Ensure the Excel file has '{PRODUCT_NAME_COLUMN}' as a column header.")
             else:
-                # Preview button
-                col1, col2 = st.columns(2)
+                df2 = pd.read_excel(uploaded_file2, header=header_row)
+                st.success(f"File loaded: {len(df2)} rows (header found in row {header_row + 1})")
 
-                if col1.button("Generate Preview", key="preview_script2", type="secondary"):
-                    config = get_config()
-                    balancer = InventoryBalancer(config)
+                # Validate
+                is_valid, errors = validate_file(df2)
+                if not is_valid:
+                    for error in errors:
+                        st.error(error)
+                else:
+                    # Apply filters
+                    df2_filtered = render_filters(df2, prefix="script2")
 
-                    with st.spinner("Generating preview..."):
-                        st.session_state.preview_results = balancer.preview(df2)
-                        st.session_state.transfer_results = None
+                    # Preview button
+                    col1, col2 = st.columns(2)
 
-                if col2.button("Generate Transfers", key="execute_script2", type="primary"):
-                    config = get_config()
-                    balancer = InventoryBalancer(config)
+                    if col1.button("Generate Preview", key="preview_script2", type="secondary"):
+                        config = get_config()
+                        balancer = InventoryBalancer(config)
 
-                    with st.spinner("Generating transfers..."):
-                        st.session_state.transfer_results = balancer.execute(df2)
+                        with st.spinner("Generating preview..."):
+                            st.session_state.preview_results_script2 = balancer.preview(df2_filtered)
+                            st.session_state.transfer_results_script2 = None
 
-                # Display results
-                if st.session_state.preview_results and not st.session_state.transfer_results:
-                    st.divider()
-                    st.subheader("Preview")
-                    render_preview(st.session_state.preview_results)
+                    if col2.button("Generate Transfers", key="execute_script2", type="primary"):
+                        config = get_config()
+                        balancer = InventoryBalancer(config)
 
-                if st.session_state.transfer_results:
-                    st.divider()
-                    st.subheader("Downloads")
-                    render_results(st.session_state.transfer_results)
+                        with st.spinner("Generating transfers..."):
+                            st.session_state.transfer_results_script2 = balancer.execute(df2_filtered)
+
+                    # Display results
+                    if st.session_state.preview_results_script2 and not st.session_state.transfer_results_script2:
+                        st.divider()
+                        st.subheader("Preview")
+                        render_preview(st.session_state.preview_results_script2, prefix="script2")
+
+                    if st.session_state.transfer_results_script2:
+                        st.divider()
+                        st.subheader("Downloads")
+                        render_results(st.session_state.transfer_results_script2)
 
         except Exception as e:
             st.error(f"Error loading file: {e}")

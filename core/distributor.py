@@ -3,9 +3,14 @@
 import pandas as pd
 from datetime import datetime
 from typing import Optional
+from collections import defaultdict
 
 from .models import Transfer, TransferPreview, TransferResult, DistributionConfig
 from .config import OUTPUT_COLUMNS
+
+# Minimum sizes rule configuration
+MIN_SIZES_THRESHOLD = 2  # If store has <= this many sizes, apply min sizes rule
+MIN_SIZES_TO_ADD = 3     # Number of different sizes to add when rule applies
 
 
 def get_stock_value(val) -> int:
@@ -22,10 +27,9 @@ class StockDistributor:
     """
     Distributes inventory from Stock (Сток) or Photo Stock (Фото склад) to stores.
 
-    For each row:
-    - Takes items from source (Stock or Photo Stock)
-    - Distributes 1 item to each store that has 0 inventory
-    - Follows priority order, respects exclusions
+    Distribution rules:
+    - If store has 0-1 sizes of a product: add 3 different sizes (only if 3+ sizes available in stock)
+    - If store has 2+ sizes of a product: normal distribution (1 item per variant with 0 stock)
     """
 
     def __init__(self, config: DistributionConfig):
@@ -40,6 +44,57 @@ class StockDistributor:
     def _get_source_name(self, source: str) -> str:
         """Get display name for the source."""
         return "Фото" if source == "photo" else "Сток"
+
+    def _analyze_product_inventory(
+        self,
+        df: pd.DataFrame,
+        source_column: str,
+        active_stores: list[str]
+    ) -> dict:
+        """
+        Analyze inventory by product to understand size distribution.
+
+        Returns:
+            Dict with product name as key, containing:
+            - rows: list of (row_idx, variant, source_qty, store_quantities)
+            - sizes_in_stock: list of variants with source_qty > 0
+        """
+        product_data = defaultdict(lambda: {"rows": [], "sizes_in_stock": []})
+
+        for idx, (original_idx, row) in enumerate(df.iterrows()):
+            product = row[self.config.product_name_column]
+            if pd.isna(product) or product == "":
+                continue
+
+            product = str(product)
+            variant = str(row.get(self.config.variant_column, "")) if pd.notna(row.get(self.config.variant_column)) else ""
+            source_qty = get_stock_value(row.get(source_column, 0))
+
+            # Get store quantities for this row
+            store_quantities = {}
+            for store in active_stores:
+                store_quantities[store] = get_stock_value(row.get(store, 0))
+
+            product_data[product]["rows"].append({
+                "row_idx": idx + 1,  # 1-based for display
+                "variant": variant,
+                "source_qty": source_qty,
+                "store_quantities": store_quantities,
+                "original_idx": original_idx,
+            })
+
+            if source_qty > 0:
+                product_data[product]["sizes_in_stock"].append(variant)
+
+        return product_data
+
+    def _get_store_sizes_count(self, product_rows: list, store: str) -> int:
+        """Count how many different sizes a store has for a product (qty > 0)."""
+        sizes_with_stock = set()
+        for row_data in product_rows:
+            if row_data["store_quantities"].get(store, 0) > 0:
+                sizes_with_stock.add(row_data["variant"])
+        return len(sizes_with_stock)
 
     def preview(self, df: pd.DataFrame, source: str = "stock") -> list[TransferPreview]:
         """
@@ -65,42 +120,96 @@ class StockDistributor:
             if s in df_filtered.columns
         ]
 
-        previews = []
+        # Analyze inventory by product
+        product_data = self._analyze_product_inventory(df_filtered, source_column, active_stores)
 
-        for idx, (original_idx, row) in enumerate(df_filtered.iterrows()):
-            product = row[self.config.product_name_column]
-            variant = row.get(self.config.variant_column, "")
-            source_qty = get_stock_value(row.get(source_column, 0))
+        # Track remaining stock per row (to avoid double-allocation)
+        remaining_stock = {}
+        for product, data in product_data.items():
+            for row_data in data["rows"]:
+                remaining_stock[row_data["original_idx"]] = row_data["source_qty"]
 
-            preview = TransferPreview(
-                row_index=idx + 1,  # 1-based for display
-                product_name=str(product) if pd.notna(product) else "",
-                variant=str(variant) if pd.notna(variant) else "",
-            )
+        # Create previews for all rows
+        previews_dict = {}
 
-            if source_qty <= 0:
-                previews.append(preview)
-                continue
-
-            remaining = source_qty
+        for product, data in product_data.items():
+            sizes_in_stock = data["sizes_in_stock"]
+            available_sizes_count = len(sizes_in_stock)
 
             for store in active_stores:
-                if remaining <= 0:
-                    break
+                store_sizes_count = self._get_store_sizes_count(data["rows"], store)
 
-                store_qty = get_stock_value(row.get(store, 0))
+                # Determine which rule to apply
+                if store_sizes_count <= 1:
+                    # Rule: Need 3 different sizes, "all or nothing"
+                    if available_sizes_count < MIN_SIZES_TO_ADD:
+                        # Not enough sizes in stock, skip this product/store
+                        continue
 
-                # Only distribute to stores with 0 inventory
-                if store_qty == 0:
-                    preview.transfers.append(Transfer(
-                        sender=source_name,
-                        receiver=store,
-                        quantity=1
-                    ))
-                    remaining -= 1
+                    # Find rows with stock that store doesn't have
+                    transferable_rows = []
+                    for row_data in data["rows"]:
+                        if row_data["source_qty"] > 0 and row_data["store_quantities"].get(store, 0) == 0:
+                            if remaining_stock[row_data["original_idx"]] > 0:
+                                transferable_rows.append(row_data)
 
-            previews.append(preview)
+                    # Need at least 3 different sizes to transfer
+                    if len(transferable_rows) >= MIN_SIZES_TO_ADD:
+                        # Transfer first 3 sizes (respecting stock availability)
+                        transferred = 0
+                        for row_data in transferable_rows:
+                            if transferred >= MIN_SIZES_TO_ADD:
+                                break
+                            if remaining_stock[row_data["original_idx"]] > 0:
+                                # Create or get preview for this row
+                                if row_data["original_idx"] not in previews_dict:
+                                    previews_dict[row_data["original_idx"]] = TransferPreview(
+                                        row_index=row_data["row_idx"],
+                                        product_name=product,
+                                        variant=row_data["variant"],
+                                    )
 
+                                previews_dict[row_data["original_idx"]].transfers.append(Transfer(
+                                    sender=source_name,
+                                    receiver=store,
+                                    quantity=1
+                                ))
+                                remaining_stock[row_data["original_idx"]] -= 1
+                                transferred += 1
+
+                else:
+                    # Rule: Normal distribution - 1 item per variant with 0 stock
+                    for row_data in data["rows"]:
+                        if (row_data["store_quantities"].get(store, 0) == 0 and
+                            remaining_stock[row_data["original_idx"]] > 0):
+
+                            # Create or get preview for this row
+                            if row_data["original_idx"] not in previews_dict:
+                                previews_dict[row_data["original_idx"]] = TransferPreview(
+                                    row_index=row_data["row_idx"],
+                                    product_name=product,
+                                    variant=row_data["variant"],
+                                )
+
+                            previews_dict[row_data["original_idx"]].transfers.append(Transfer(
+                                sender=source_name,
+                                receiver=store,
+                                quantity=1
+                            ))
+                            remaining_stock[row_data["original_idx"]] -= 1
+
+        # Create previews for rows without transfers
+        for product, data in product_data.items():
+            for row_data in data["rows"]:
+                if row_data["original_idx"] not in previews_dict:
+                    previews_dict[row_data["original_idx"]] = TransferPreview(
+                        row_index=row_data["row_idx"],
+                        product_name=product,
+                        variant=row_data["variant"],
+                    )
+
+        # Sort by row index and return
+        previews = sorted(previews_dict.values(), key=lambda p: p.row_index)
         return previews
 
     def execute(self, df: pd.DataFrame, source: str = "stock") -> list[TransferResult]:
