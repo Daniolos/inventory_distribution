@@ -219,6 +219,72 @@ def get_config() -> DistributionConfig:
     )
 
 
+def generate_problems_excel(previews: list[TransferPreview]) -> tuple[bytes, int]:
+    """Generate Excel with problem cases from previews.
+    
+    Returns:
+        Tuple of (excel_bytes, problem_count)
+    """
+    problems = []
+    
+    for p in previews:
+        if not p.has_transfers:
+            continue
+            
+        # Fallback priority (product not in sales data)
+        if p.uses_fallback_priority:
+            problems.append({
+                "Строка": p.row_index,
+                "Артикул": p.product_name,
+                "Вариант": p.variant or "—",
+                "Проблема": "📊 Fallback",
+                "Магазин": "—",
+                "Детали": "Товар не найден в данных продаж",
+            })
+        
+        # Standard distribution (<4 sizes)
+        if p.uses_standard_distribution:
+            problems.append({
+                "Строка": p.row_index,
+                "Артикул": p.product_name,
+                "Вариант": p.variant or "—",
+                "Проблема": "ℹ️ Standard",
+                "Магазин": "—",
+                "Детали": "<4 размеров — стандартное распределение",
+            })
+        
+        # Skipped stores
+        for skipped in p.skipped_stores:
+            store_id = skipped.store_name.split()[0] if skipped.store_name else skipped.store_name
+            
+            if skipped.reason == "min_sizes":
+                problems.append({
+                    "Строка": p.row_index,
+                    "Артикул": p.product_name,
+                    "Вариант": p.variant or "—",
+                    "Проблема": "📉 Min-Sizes",
+                    "Магазин": store_id,
+                    "Детали": "Недостаточно размеров для этого магазина",
+                })
+            elif skipped.reason == "excluded":
+                problems.append({
+                    "Строка": p.row_index,
+                    "Артикул": p.product_name,
+                    "Вариант": p.variant or "—",
+                    "Проблема": "🚫 Excluded",
+                    "Магазин": store_id,
+                    "Детали": "Магазин исключён из распределения",
+                })
+    
+    if not problems:
+        return b"", 0
+    
+    df = pd.DataFrame(problems)
+    excel_buffer = io.BytesIO()
+    df.to_excel(excel_buffer, index=False, sheet_name="Проблемы")
+    return excel_buffer.getvalue(), len(problems)
+
+
 def render_preview(previews: list[TransferPreview], prefix: str = "default"):
     """Render the preview section with per-row status icons.
 
@@ -336,7 +402,7 @@ def render_preview(previews: list[TransferPreview], prefix: str = "default"):
         st.info("Нет перемещений для текущих настроек.")
 
 
-def render_results(results: list[TransferResult]):
+def render_results(results: list[TransferResult], previews: list[TransferPreview] | None = None):
     """Render the download section."""
     st.success(f"{len(results)} файлов перемещений создано!")
 
@@ -352,13 +418,40 @@ def render_results(results: list[TransferResult]):
             result.data.to_excel(excel_buffer, index=False)
             zip_file.writestr(result.filename, excel_buffer.getvalue())
 
-    st.download_button(
-        label="Скачать всё в ZIP",
-        data=zip_buffer.getvalue(),
-        file_name=f"transfers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
-        mime="application/zip",
-        type="primary",
-    )
+    # Download buttons row (ZIP + optional problems)
+    if previews:
+        problems_excel, problem_count = generate_problems_excel(previews)
+        if problem_count > 0:
+            col1, col2 = st.columns(2)
+            col1.download_button(
+                label="Скачать всё в ZIP",
+                data=zip_buffer.getvalue(),
+                file_name=f"transfers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                mime="application/zip",
+                type="primary",
+            )
+            col2.download_button(
+                label=f"📋 Скачать проблемы ({problem_count})",
+                data=problems_excel,
+                file_name=f"problems_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        else:
+            st.download_button(
+                label="Скачать всё в ZIP",
+                data=zip_buffer.getvalue(),
+                file_name=f"transfers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                mime="application/zip",
+                type="primary",
+            )
+    else:
+        st.download_button(
+            label="Скачать всё в ZIP",
+            data=zip_buffer.getvalue(),
+            file_name=f"transfers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+            mime="application/zip",
+            type="primary",
+        )
 
     st.divider()
     st.subheader("Отдельные файлы")
@@ -544,7 +637,10 @@ with tab1:
                     if st.session_state.transfer_results_script1:
                         st.divider()
                         st.subheader("Загрузки")
-                        render_results(st.session_state.transfer_results_script1)
+                        render_results(
+                            st.session_state.transfer_results_script1,
+                            st.session_state.preview_results_script1
+                        )
 
         except Exception as e:
             st.error(f"Ошибка загрузки файла: {e}")
