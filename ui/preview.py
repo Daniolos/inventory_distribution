@@ -186,6 +186,8 @@ def render_preview(previews: list[TransferPreview], prefix: str = "default"):
             icons.append("📊")  # Fallback priority
         if preview.uses_standard_distribution:
             icons.append("🔢")  # Standard distribution (<4 sizes)
+        if any(s.reason == "excluded" for s in preview.skipped_stores):
+            icons.append("🚫")  # Excluded stores
         row_icons = " ".join(icons)
         if row_icons:
             row_icons += " "
