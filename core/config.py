@@ -30,6 +30,7 @@ VARIANT_COLUMN = "Характеристика"
 # Filter columns (optional, used for filtering rows before processing)
 COLLECTION_COLUMN = "Коллекция (сезон)"
 ADDITIONAL_NAME_COLUMN = "Наименование_доп"
+ARTICLE_TYPE_FILTER_LABEL = "Тип артикула"
 
 # Output columns for transfer files
 OUTPUT_COLUMNS = [
