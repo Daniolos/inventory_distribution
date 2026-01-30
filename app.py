@@ -320,11 +320,22 @@ def render_preview(previews: list[TransferPreview], prefix: str = "default"):
     
     # Indicator filter row (compact checkboxes) - whitelist: check to show ONLY these
     st.caption("Фильтр по индикаторам (✓ = показать только эти):")
-    icol1, icol2, icol3, icol4 = st.columns(4)
+    icol1, icol2, icol3, icol4, icol5 = st.columns(5)
     only_fallback = icol1.checkbox(f"📊 Fallback ({fallback_count})", value=False, key=f"{prefix}_filter_fallback")
     only_min_sizes = icol2.checkbox(f"📉 Min-Sizes ({min_sizes_count})", value=False, key=f"{prefix}_filter_min_sizes")
     only_standard = icol3.checkbox(f"ℹ️ Standard ({standard_count})", value=False, key=f"{prefix}_filter_standard")
     only_excluded = icol4.checkbox(f"🚫 Excluded ({excluded_count})", value=False, key=f"{prefix}_filter_excluded")
+    
+    # Problems download button
+    problems_excel, problem_count = generate_problems_excel(previews)
+    if problem_count > 0:
+        icol5.download_button(
+            label=f"📋 ({problem_count})",
+            data=problems_excel,
+            file_name=f"problems_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"{prefix}_download_problems",
+        )
     
     # Check if any filter is active
     any_filter_active = only_fallback or only_min_sizes or only_standard or only_excluded
@@ -402,7 +413,7 @@ def render_preview(previews: list[TransferPreview], prefix: str = "default"):
         st.info("Нет перемещений для текущих настроек.")
 
 
-def render_results(results: list[TransferResult], previews: list[TransferPreview] | None = None):
+def render_results(results: list[TransferResult]):
     """Render the download section."""
     st.success(f"{len(results)} файлов перемещений создано!")
 
@@ -418,40 +429,13 @@ def render_results(results: list[TransferResult], previews: list[TransferPreview
             result.data.to_excel(excel_buffer, index=False)
             zip_file.writestr(result.filename, excel_buffer.getvalue())
 
-    # Download buttons row (ZIP + optional problems)
-    if previews:
-        problems_excel, problem_count = generate_problems_excel(previews)
-        if problem_count > 0:
-            col1, col2 = st.columns(2)
-            col1.download_button(
-                label="Скачать всё в ZIP",
-                data=zip_buffer.getvalue(),
-                file_name=f"transfers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
-                mime="application/zip",
-                type="primary",
-            )
-            col2.download_button(
-                label=f"📋 Скачать проблемы ({problem_count})",
-                data=problems_excel,
-                file_name=f"problems_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-        else:
-            st.download_button(
-                label="Скачать всё в ZIP",
-                data=zip_buffer.getvalue(),
-                file_name=f"transfers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
-                mime="application/zip",
-                type="primary",
-            )
-    else:
-        st.download_button(
-            label="Скачать всё в ZIP",
-            data=zip_buffer.getvalue(),
-            file_name=f"transfers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
-            mime="application/zip",
-            type="primary",
-        )
+    st.download_button(
+        label="Скачать всё в ZIP",
+        data=zip_buffer.getvalue(),
+        file_name=f"transfers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+        mime="application/zip",
+        type="primary",
+    )
 
     st.divider()
     st.subheader("Отдельные файлы")
@@ -637,10 +621,7 @@ with tab1:
                     if st.session_state.transfer_results_script1:
                         st.divider()
                         st.subheader("Загрузки")
-                        render_results(
-                            st.session_state.transfer_results_script1,
-                            st.session_state.preview_results_script1
-                        )
+                        render_results(st.session_state.transfer_results_script1)
 
         except Exception as e:
             st.error(f"Ошибка загрузки файла: {e}")
