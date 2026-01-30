@@ -281,21 +281,21 @@ def render_preview(previews: list[TransferPreview], prefix: str = "default"):
         if preview.has_transfers:
             header = f"{row_icons}Строка {preview.row_index}: {preview.product_name}{variant_text} ({len(preview.transfers)} перемещений)"
             with st.expander(header.strip(), expanded=False):
-                # Show status reasons if applicable
+                # Show status reasons if applicable (using st.info for better visibility)
                 if preview.uses_fallback_priority:
-                    st.caption("📊 Товар не найден в данных продаж — используется статический приоритет")
+                    st.info("📊 Товар не найден в данных продаж — используется статический приоритет")
                 if preview.uses_standard_distribution:
-                    st.caption("ℹ️ <4 размеров — стандартное распределение")
+                    st.info("ℹ️ <4 размеров — стандартное распределение")
                 
-                # Show skipped stores before transfers
+                # Show skipped stores before transfers (gray styling to distinguish from actual transfers)
                 for skipped in preview.skipped_stores:
                     store_id = skipped.store_name.split()[0] if skipped.store_name else skipped.store_name
                     if skipped.reason == "min_sizes":
-                        st.markdown(f"└─ 📉 **{store_id}** пропущен *(недостаточно размеров)*")
+                        st.markdown(f'<span style="color: gray">└─ 📉 {store_id} пропущен (недостаточно размеров)</span>', unsafe_allow_html=True)
                     elif skipped.reason == "has_stock":
-                        st.markdown(f"└─ **{store_id}** пропущен *(уже есть: {skipped.existing_qty} шт.)*")
+                        st.markdown(f'<span style="color: gray">└─ {store_id} пропущен (уже есть: {skipped.existing_qty} шт.)</span>', unsafe_allow_html=True)
                 
-                # Show transfers
+                # Show transfers (prominent styling)
                 for transfer in preview.transfers:
                     receiver_display = transfer.receiver.split()[0] if transfer.receiver != "Сток" else "Сток"
                     st.markdown(f"└─ **{transfer.sender}** → **{receiver_display}**: {transfer.quantity} шт.")
