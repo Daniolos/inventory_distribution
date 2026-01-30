@@ -2,7 +2,7 @@
 
 import pandas as pd
 from datetime import datetime
-from typing import Optional
+from typing import Optional, BinaryIO
 from collections import defaultdict
 
 from .models import (
@@ -12,6 +12,7 @@ from .models import (
     DistributionConfig,
     SalesPriorityData,
     SkippedStore,
+    UpdatedInventoryResult,
     build_store_id_map,
 )
 from .sales_parser import extract_product_code_from_input
@@ -155,9 +156,10 @@ class StockDistributor:
             for store in active_stores:
                 store_quantities[store] = get_stock_value(row.get(store, 0))
 
-            # Calculate Excel row: header_row (0-based) + 2 (1 for 1-based, 1 for data after header) + original_idx
+            # Calculate Excel row: header_row (0-based) + 3 + original_idx
+            # Breakdown: +1 for 1-based Excel, +1 for header row, +1 for skipped sub-header row
             # Using original_idx (pandas index) instead of idx to preserve correct row number after filtering
-            excel_row = header_row + 2 + original_idx
+            excel_row = header_row + 3 + original_idx
 
             product_data[product]["rows"].append({
                 "row_idx": excel_row,  # Excel row number for display
@@ -446,3 +448,36 @@ class StockDistributor:
             ))
 
         return results
+
+    def generate_updated_inventory(
+        self,
+        original_file: BinaryIO,
+        df: pd.DataFrame,
+        source: str = "stock",
+        header_row: int = 0
+    ) -> UpdatedInventoryResult:
+        """
+        Generate updated inventory Excel after distribution.
+
+        Args:
+            original_file: Original uploaded file (for preserving format)
+            df: Input DataFrame
+            source: "stock" or "photo"
+            header_row: 0-indexed header row
+
+        Returns:
+            UpdatedInventoryResult with Excel bytes
+        """
+        from .inventory_updater import generate_updated_inventory_result
+
+        previews = self.preview(df, source, header_row)
+        source_column = self._get_source_column(source)
+        source_name = self._get_source_name(source)
+
+        return generate_updated_inventory_result(
+            original_file,
+            previews,
+            source_column,
+            source_name,
+            header_row
+        )

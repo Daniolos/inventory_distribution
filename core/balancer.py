@@ -120,9 +120,10 @@ class InventoryBalancer:
             variant = row.get(self.config.variant_column, "")
             product_name = str(product) if pd.notna(product) else ""
 
-            # Calculate Excel row: header_row (0-based) + 2 (1 for 1-based, 1 for data after header) + original_idx
+            # Calculate Excel row: header_row (0-based) + 3 + original_idx
+            # Breakdown: +1 for 1-based Excel, +1 for header row, +1 for skipped sub-header row
             # Using original_idx (pandas index) instead of idx to preserve correct row number after filtering
-            excel_row = header_row + 2 + original_idx
+            excel_row = header_row + 3 + original_idx
 
             # Get product-specific store priority
             product_stores, uses_fallback = self._get_product_priority(product_name, available_stores)

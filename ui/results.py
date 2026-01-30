@@ -7,15 +7,20 @@ import streamlit as st
 import io
 import zipfile
 from datetime import datetime
+from typing import Optional
 
-from core.models import TransferResult
+from core.models import TransferResult, UpdatedInventoryResult
 
 
-def render_results(results: list[TransferResult]):
+def render_results(
+    results: list[TransferResult],
+    updated_inventory: Optional[UpdatedInventoryResult] = None
+):
     """Render the download section with ZIP and individual file downloads.
-    
+
     Args:
         results: List of transfer results to render
+        updated_inventory: Optional updated inventory result for download
     """
     st.success(f"{len(results)} файлов перемещений создано!")
 
@@ -56,4 +61,35 @@ def render_results(results: list[TransferResult]):
             file_name=result.filename,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key=f"download_{result.filename}",
+        )
+
+    # Updated inventory download section
+    if updated_inventory:
+        st.divider()
+        st.subheader("Обновлённый инвентарь")
+
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            st.info(
+                f"**{updated_inventory.total_rows_updated}** строк обновлено, "
+                f"**{updated_inventory.total_quantity_transferred}** единиц перемещено"
+            )
+
+        if updated_inventory.warnings:
+            with st.expander(f"Предупреждения ({len(updated_inventory.warnings)})"):
+                for warning in updated_inventory.warnings:
+                    st.warning(warning)
+
+        st.download_button(
+            label="Скачать обновлённый Excel",
+            data=updated_inventory.data,
+            file_name=updated_inventory.filename,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
+            key="download_updated_inventory",
+        )
+
+        st.caption(
+            "Этот Excel содержит обновлённые остатки после распределения. "
+            "Используйте его как входной файл для следующего источника."
         )

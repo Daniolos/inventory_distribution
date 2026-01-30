@@ -210,6 +210,17 @@ class TransferResult:
 
 
 @dataclass
+class UpdatedInventoryResult:
+    """Result containing updated inventory Excel data."""
+    filename: str
+    data: bytes  # Excel file bytes
+    source_column: str  # "Сток" or "Фото склад"
+    total_rows_updated: int
+    total_quantity_transferred: int
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
 class DistributionConfig:
     """Configuration for distribution operations."""
     store_priority: list[str] = field(default_factory=list)

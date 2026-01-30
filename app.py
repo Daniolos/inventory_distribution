@@ -221,6 +221,7 @@ with tab1:
                         with st.spinner("Генерация предпросмотра..."):
                             st.session_state.preview_results_script1 = distributor.preview(df_filtered, source, header_row)
                             st.session_state.transfer_results_script1 = None
+                            st.session_state.updated_inventory_script1 = None
 
                     if col2.button("Создать перемещения", key="execute_script1", type="primary"):
                         config = get_config()
@@ -231,6 +232,15 @@ with tab1:
 
                         with st.spinner("Создание перемещений..."):
                             st.session_state.transfer_results_script1 = distributor.execute(df_filtered, source, header_row)
+
+                            # Generate updated inventory Excel
+                            uploaded_file.seek(0)  # Reset file pointer
+                            st.session_state.updated_inventory_script1 = distributor.generate_updated_inventory(
+                                uploaded_file,
+                                df_filtered,
+                                source,
+                                header_row
+                            )
 
                     # Display results
                     if st.session_state.preview_results_script1 and not st.session_state.transfer_results_script1:
@@ -244,7 +254,10 @@ with tab1:
                     if st.session_state.transfer_results_script1:
                         st.divider()
                         st.subheader("Загрузки")
-                        render_results(st.session_state.transfer_results_script1)
+                        render_results(
+                            st.session_state.transfer_results_script1,
+                            updated_inventory=st.session_state.updated_inventory_script1
+                        )
 
         except Exception as e:
             st.error(f"Ошибка загрузки файла: {e}")

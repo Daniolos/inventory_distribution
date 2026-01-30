@@ -77,8 +77,6 @@ def render_article_type_filter(
         f"Фильтр по {ARTICLE_TYPE_FILTER_LABEL} ({selected_count} из {total_count})",
         expanded=st.session_state[expander_key]
     ):
-        # Mark as open when user interacts
-        st.session_state[expander_key] = True
         
         # Action buttons
         col_btn1, col_btn2, _ = st.columns([1, 1, 4])

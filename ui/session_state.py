@@ -27,6 +27,8 @@ def init_session_state():
         st.session_state.preview_results_script1 = None
     if "transfer_results_script1" not in st.session_state:
         st.session_state.transfer_results_script1 = None
+    if "updated_inventory_script1" not in st.session_state:
+        st.session_state.updated_inventory_script1 = None
     
     # Preview/Results for Script 2 (Balance Inventory)
     if "preview_results_script2" not in st.session_state:
