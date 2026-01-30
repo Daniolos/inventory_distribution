@@ -244,3 +244,57 @@ class TestPhotoStockDistribution:
         assert preview.total_quantity == 3
         for transfer in preview.transfers:
             assert transfer.sender == "Фото"
+
+
+class TestExcelRowCalculation:
+    """Tests for correct Excel row number calculation.
+
+    Excel structure (with header_row=6, 0-indexed):
+    - Row 7 (index 6): Header row
+    - Row 8 (index 7): Sub-header row (skipped with skiprows)
+    - Row 9 (index 8): First data row → pandas index 0
+    - Row 10 (index 9): Second data row → pandas index 1
+    """
+
+    def test_row_index_calculation_single_row(self, config):
+        """First data row should have row_index = header_row + 3."""
+        rows = [create_test_row("Product A", "Size M", stock=5)]
+        df = create_test_df(rows)
+
+        distributor = StockDistributor(config)
+        # header_row=6 (0-indexed) means Excel row 7 is the header
+        previews = distributor.preview(df, source="stock", header_row=6)
+
+        assert len(previews) == 1
+        # First data row: header_row(6) + 3 + pandas_index(0) = 9
+        assert previews[0].row_index == 9
+
+    def test_row_index_calculation_multiple_rows(self, config):
+        """Multiple rows should have consecutive row_index values."""
+        rows = [
+            create_test_row("Product A", "Size S", stock=1),
+            create_test_row("Product A", "Size M", stock=1),
+            create_test_row("Product A", "Size L", stock=1),
+        ]
+        df = create_test_df(rows)
+
+        distributor = StockDistributor(config)
+        previews = distributor.preview(df, source="stock", header_row=6)
+
+        assert len(previews) == 3
+        # Rows should be 9, 10, 11 (header_row + 3 + index)
+        row_indices = sorted([p.row_index for p in previews])
+        assert row_indices == [9, 10, 11]
+
+    def test_row_index_with_different_header_row(self, config):
+        """Row index should adjust based on header_row parameter."""
+        rows = [create_test_row("Product A", "Size M", stock=5)]
+        df = create_test_df(rows)
+
+        distributor = StockDistributor(config)
+        # header_row=10 means Excel row 11 is the header
+        previews = distributor.preview(df, source="stock", header_row=10)
+
+        assert len(previews) == 1
+        # First data row: header_row(10) + 3 + pandas_index(0) = 13
+        assert previews[0].row_index == 13

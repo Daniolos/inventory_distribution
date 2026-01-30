@@ -17,6 +17,7 @@ For module details see [ARCHITECTURE.md](ARCHITECTURE.md).
 - **UI Text:** User-facing strings in Russian (Streamlit labels, messages, etc.)
 - **Types:** Type hints for all functions
 - **Tests:** Pytest in `tests/`, run before commit
+- **Documentation:** Update [ARCHITECTURE.md](ARCHITECTURE.md) when adding/changing modules, functions, or data flow
 
 ## Common Tasks
 

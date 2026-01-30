@@ -66,12 +66,13 @@ def create_test_df(rows: list[dict], header_row: int = 7) -> pd.DataFrame:
 
     Args:
         rows: List of row dictionaries
-        header_row: The header row number (for index calculation)
+        header_row: The header row number (unused, kept for compatibility)
 
     Returns:
-        DataFrame with proper index starting from header_row + 1
+        DataFrame with default pandas index starting from 0
+        (matches real pd.read_excel behavior with skiprows)
     """
     df = pd.DataFrame(rows)
-    # Set index to match Excel row numbers (header_row + 1 for first data row)
-    df.index = range(header_row + 1, header_row + 1 + len(rows))
+    # Keep default pandas index (0, 1, 2, ...) to match real pd.read_excel behavior
+    # The distributor calculates Excel rows as: header_row + 3 + original_idx
     return df

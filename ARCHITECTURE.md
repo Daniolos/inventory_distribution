@@ -23,6 +23,7 @@ tests/                    # Pytest Tests
 **StockDistributor** - Distributes warehouse → stores
 - `preview(df, source, header_row)` → List[TransferPreview]
 - `execute(df, source, header_row)` → List[TransferResult]
+- `generate_updated_inventory(file, df, source, header_row)` → UpdatedInventoryResult
 
 ### `core/balancer.py`
 **InventoryBalancer** - Balances inventory between stores
@@ -38,7 +39,11 @@ tests/                    # Pytest Tests
 - `apply_all_filters(df, ...)` - Filters DataFrame
 
 ### `core/models.py`
-Dataclasses: `Transfer`, `TransferPreview`, `TransferResult`, `DistributionConfig`
+Dataclasses: `Transfer`, `TransferPreview`, `TransferResult`, `DistributionConfig`, `UpdatedInventoryResult`
+
+### `core/inventory_updater.py`
+- `apply_transfers_to_inventory(file, previews, source_col, header_row)` → (bytes, warnings)
+- `generate_updated_inventory_result(...)` → UpdatedInventoryResult
 
 ### `core/sales_parser.py`
 - `parse_sales_file(file)` → SalesPriorityData
@@ -58,7 +63,7 @@ Dataclasses: `Transfer`, `TransferPreview`, `TransferResult`, `DistributionConfi
 - `generate_problems_excel(previews)` - Exports problems
 
 ### `ui/results.py`
-- `render_results(results)` - Download buttons (ZIP + individual files)
+- `render_results(results, updated_inventory)` - Download buttons (ZIP + individual files + updated inventory)
 
 ## Data Flow
 
@@ -71,5 +76,7 @@ StockDistributor/Balancer.preview() → TransferPreview[]
      ↓
 render_preview() / .execute() → TransferResult[]
      ↓
-render_results() → Download
+render_results() → Download (ZIP + individual files)
+     ↓
+generate_updated_inventory() → UpdatedInventoryResult → Download (for next source)
 ```
