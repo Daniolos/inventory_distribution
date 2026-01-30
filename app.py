@@ -226,29 +226,24 @@ def render_preview(previews: list[TransferPreview], prefix: str = "default"):
         previews: List of transfer previews to display
         prefix: Unique prefix for widget keys to avoid duplicate IDs
     """
-    # Summary
+    # Calculate all counts
     total_rows = len(previews)
     rows_with_transfers = sum(1 for p in previews if p.has_transfers)
     total_transfers = sum(len(p.transfers) for p in previews)
     total_quantity = sum(p.total_quantity for p in previews)
+    
+    # Indicator counts (for rows with transfers only)
     fallback_count = sum(1 for p in previews if p.uses_fallback_priority and p.has_transfers)
-    min_sizes_skipped_count = sum(1 for p in previews if p.min_sizes_skipped and p.has_transfers)
+    min_sizes_count = sum(1 for p in previews if p.min_sizes_skipped and p.has_transfers)
+    standard_count = sum(1 for p in previews if p.uses_standard_distribution and p.has_transfers)
+    excluded_count = sum(1 for p in previews if any(s.reason == "excluded" for s in p.skipped_stores) and p.has_transfers)
 
-    # Show metrics - add extra columns if sales data is active
-    if st.session_state.sales_priority_data:
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
-        col1.metric("Всего строк", total_rows)
-        col2.metric("Строк с перемещениями", rows_with_transfers)
-        col3.metric("Перемещения", total_transfers)
-        col4.metric("Всего единиц", total_quantity)
-        col5.metric("📊 Без данных продаж", fallback_count)
-        col6.metric("📉 Недостаточно размеров", min_sizes_skipped_count)
-    else:
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Всего строк", total_rows)
-        col2.metric("Строк с перемещениями", rows_with_transfers)
-        col3.metric("Перемещения", total_transfers)
-        col4.metric("Всего единиц", total_quantity)
+    # Basic metrics row
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Всего строк", total_rows)
+    col2.metric("Строк с перемещениями", rows_with_transfers)
+    col3.metric("Перемещения", total_transfers)
+    col4.metric("Всего единиц", total_quantity)
 
     # Filter options
     show_only_transfers = st.checkbox(
@@ -256,12 +251,35 @@ def render_preview(previews: list[TransferPreview], prefix: str = "default"):
         value=True,
         key=f"{prefix}_show_only_transfers"
     )
+    
+    # Indicator filter row (compact checkboxes) - whitelist: check to show ONLY these
+    st.caption("Фильтр по индикаторам (✓ = показать только эти):")
+    icol1, icol2, icol3, icol4 = st.columns(4)
+    only_fallback = icol1.checkbox(f"📊 Fallback ({fallback_count})", value=False, key=f"{prefix}_filter_fallback")
+    only_min_sizes = icol2.checkbox(f"📉 Min-Sizes ({min_sizes_count})", value=False, key=f"{prefix}_filter_min_sizes")
+    only_standard = icol3.checkbox(f"ℹ️ Standard ({standard_count})", value=False, key=f"{prefix}_filter_standard")
+    only_excluded = icol4.checkbox(f"🚫 Excluded ({excluded_count})", value=False, key=f"{prefix}_filter_excluded")
+    
+    # Check if any filter is active
+    any_filter_active = only_fallback or only_min_sizes or only_standard or only_excluded
 
     # Display previews
     displayed = 0
     for preview in previews:
         if show_only_transfers and not preview.has_transfers:
             continue
+        
+        # Apply indicator filters (whitelist: show ONLY rows matching checked indicators)
+        has_excluded = any(s.reason == "excluded" for s in preview.skipped_stores)
+        if any_filter_active:
+            matches_filter = (
+                (only_fallback and preview.uses_fallback_priority) or
+                (only_min_sizes and preview.min_sizes_skipped) or
+                (only_standard and preview.uses_standard_distribution) or
+                (only_excluded and has_excluded)
+            )
+            if not matches_filter:
+                continue
 
         displayed += 1
         variant_text = f" / {preview.variant}" if preview.variant else ""
