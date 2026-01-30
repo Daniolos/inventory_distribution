@@ -6,29 +6,27 @@ A user-friendly web interface for distributing inventory between stores.
 
 import streamlit as st
 import pandas as pd
-import io
-import zipfile
-from datetime import datetime
 
 from core import (
     StockDistributor,
     InventoryBalancer,
     DistributionConfig,
-    TransferPreview,
-    TransferResult,
     parse_sales_file,
+    find_header_row,
 )
 from core.config import (
-    DEFAULT_STORE_PRIORITY,
-    DEFAULT_EXCLUDED_STORES,
-    DEFAULT_BALANCE_THRESHOLD,
     PRODUCT_NAME_COLUMN,
     VARIANT_COLUMN,
     STOCK_COLUMN,
     PHOTO_STOCK_COLUMN,
-    COLLECTION_COLUMN,
-    ADDITIONAL_NAME_COLUMN,
-    ARTICLE_TYPE_FILTER_LABEL,
+)
+from ui import (
+    init_session_state,
+    move_store_up,
+    move_store_down,
+    render_filters,
+    render_preview,
+    render_results,
 )
 
 # Page config
@@ -39,563 +37,49 @@ st.set_page_config(
 )
 
 # Initialize session state
-if "store_priority" not in st.session_state:
-    st.session_state.store_priority = DEFAULT_STORE_PRIORITY.copy()
-if "excluded_stores" not in st.session_state:
-    st.session_state.excluded_stores = DEFAULT_EXCLUDED_STORES.copy()
-if "balance_threshold" not in st.session_state:
-    st.session_state.balance_threshold = DEFAULT_BALANCE_THRESHOLD
-# Separate session states for each tab to avoid duplicate widget IDs
-if "preview_results_script1" not in st.session_state:
-    st.session_state.preview_results_script1 = None
-if "transfer_results_script1" not in st.session_state:
-    st.session_state.transfer_results_script1 = None
-if "preview_results_script2" not in st.session_state:
-    st.session_state.preview_results_script2 = None
-if "transfer_results_script2" not in st.session_state:
-    st.session_state.transfer_results_script2 = None
-# Sales priority data
-if "sales_priority_data" not in st.session_state:
-    st.session_state.sales_priority_data = None
-if "sales_file_name" not in st.session_state:
-    st.session_state.sales_file_name = None
-
-
-def move_store_up(idx: int):
-    """Move a store up in priority."""
-    if idx > 0:
-        stores = st.session_state.store_priority
-        stores[idx], stores[idx - 1] = stores[idx - 1], stores[idx]
-        st.session_state.store_priority = stores
-
-
-def move_store_down(idx: int):
-    """Move a store down in priority."""
-    stores = st.session_state.store_priority
-    if idx < len(stores) - 1:
-        stores[idx], stores[idx + 1] = stores[idx + 1], stores[idx]
-        st.session_state.store_priority = stores
+init_session_state()
 
 
 def validate_file(df: pd.DataFrame) -> tuple[bool, list[str]]:
-    """Validate that the uploaded file has required columns."""
+    """Validate that the uploaded file has required columns.
+    
+    Args:
+        df: Input DataFrame
+        
+    Returns:
+        Tuple of (is_valid, list_of_error_messages)
+    """
     errors = []
+    required_cols = [PRODUCT_NAME_COLUMN, VARIANT_COLUMN]
 
-    if PRODUCT_NAME_COLUMN not in df.columns:
-        errors.append(f"Столбец '{PRODUCT_NAME_COLUMN}' не найден")
-    if VARIANT_COLUMN not in df.columns:
-        errors.append(f"Столбец '{VARIANT_COLUMN}' не найден")
-    if STOCK_COLUMN not in df.columns:
-        errors.append(f"Столбец '{STOCK_COLUMN}' не найден")
+    for col in required_cols:
+        if col not in df.columns:
+            errors.append(f"Отсутствует столбец: '{col}'")
 
-    # Check for at least one store column
-    store_columns = [
-        col for col in df.columns
-        if col in st.session_state.store_priority
-    ]
-    if not store_columns:
-        errors.append("Не найдены столбцы магазинов")
+    # Check for at least one of: Stock or Photo Stock
+    has_stock = STOCK_COLUMN in df.columns
+    has_photo = PHOTO_STOCK_COLUMN in df.columns
+
+    if not has_stock and not has_photo:
+        errors.append(f"Отсутствуют столбцы '{STOCK_COLUMN}' и '{PHOTO_STOCK_COLUMN}'")
 
     return len(errors) == 0, errors
 
 
-def _format_filter_value(val) -> str:
-    """Format a value for display in filter options.
-
-    Converts floats that are whole numbers to integers (e.g., 2221.0 -> "2221").
-    """
-    if pd.isna(val):
-        return ""
-    if isinstance(val, float) and val.is_integer():
-        return str(int(val))
-    return str(val)
-
-
-def _extract_article_name(nomenclature) -> str:
-    """Extract article name from Номенклатура.
-    
-    Example: 'Мужские шорты_C3 34770.4007/6214' -> 'Мужские шорты'
-    """
-    if pd.isna(nomenclature):
-        return ""
-    # Split on '_' and take first part (the name before the code)
-    parts = str(nomenclature).split('_')
-    return parts[0].strip()
-
-
-def _render_article_type_filter(
-    df: pd.DataFrame,
-    prefix: str,
-) -> list[str]:
-    """Render article type filter as checkbox expander with form.
-    
-    Uses st.form to prevent reruns during checkbox selection.
-    
-    Args:
-        df: Input DataFrame
-        prefix: Unique prefix for widget keys
-        
-    Returns:
-        List of selected article types
-    """
-    # Extract unique article types
-    article_types = df[PRODUCT_NAME_COLUMN].apply(_extract_article_name).unique().tolist()
-    article_types = [v for v in article_types if v.strip()]
-    article_types.sort()
-    
-    if not article_types:
-        return []
-    
-    total_count = len(article_types)
-    
-    # Session state keys
-    result_key = f"{prefix}_article_filter_result"
-    select_all_key = f"{prefix}_article_select_all"
-    clear_all_key = f"{prefix}_article_clear_all"
-    expander_key = f"{prefix}_article_expander_open"
-    
-    # Initialize session state
-    if result_key not in st.session_state:
-        st.session_state[result_key] = set()
-    if expander_key not in st.session_state:
-        st.session_state[expander_key] = False
-    
-    # Handle button flags from previous run
-    if st.session_state.get(select_all_key, False):
-        for at in article_types:
-            st.session_state[f"{prefix}_cb_{at}"] = True
-        st.session_state[select_all_key] = False
-        st.session_state[expander_key] = True  # Keep expander open
-    
-    if st.session_state.get(clear_all_key, False):
-        for at in article_types:
-            st.session_state[f"{prefix}_cb_{at}"] = False
-        st.session_state[clear_all_key] = False
-        st.session_state[expander_key] = True  # Keep expander open
-    
-    selected_count = len(st.session_state[result_key])
-    
-    # Expander with count in label (persisted state)
-    with st.expander(
-        f"Фильтр по {ARTICLE_TYPE_FILTER_LABEL} ({selected_count} из {total_count})",
-        expanded=st.session_state[expander_key]
-    ):
-        # Mark as open when user interacts
-        st.session_state[expander_key] = True
-        
-        # Action buttons
-        col_btn1, col_btn2, _ = st.columns([1, 1, 4])
-        
-        with col_btn1:
-            if st.button("Выбрать все", key=f"{prefix}_btn_select_all"):
-                st.session_state[select_all_key] = True
-                st.rerun()
-        
-        with col_btn2:
-            if st.button("Очистить", key=f"{prefix}_btn_clear"):
-                st.session_state[clear_all_key] = True
-                st.rerun()
-        
-        # Form prevents rerun on checkbox clicks
-        with st.form(key=f"{prefix}_article_filter_form"):
-            # Two-column layout for checkboxes
-            col1, col2 = st.columns(2)
-            
-            for i, article_type in enumerate(article_types):
-                checkbox_key = f"{prefix}_cb_{article_type}"
-                
-                # Initialize checkbox state from applied result
-                if checkbox_key not in st.session_state:
-                    st.session_state[checkbox_key] = article_type in st.session_state[result_key]
-                
-                col = col1 if i % 2 == 0 else col2
-                with col:
-                    st.checkbox(article_type, key=checkbox_key)
-            
-            # Submit button
-            submitted = st.form_submit_button("Применить фильтр")
-            
-            if submitted:
-                # Collect all checked items and update result
-                selected = set()
-                for at in article_types:
-                    if st.session_state.get(f"{prefix}_cb_{at}", False):
-                        selected.add(at)
-                st.session_state[result_key] = selected
-                st.session_state[expander_key] = True  # Keep expander open
-                st.rerun()  # Rerun to update counter in label
-    
-    return list(st.session_state[result_key])
-
-
-def render_filters(df: pd.DataFrame, prefix: str) -> pd.DataFrame:
-    """Render filter UI and return filtered DataFrame.
-
-    Args:
-        df: Input DataFrame
-        prefix: Unique prefix for widget keys
-
-    Returns:
-        Filtered DataFrame
-    """
-    # Check which filter columns are available
-    has_collection = COLLECTION_COLUMN in df.columns
-    has_additional_name = ADDITIONAL_NAME_COLUMN in df.columns
-    has_nomenclature = PRODUCT_NAME_COLUMN in df.columns
-
-    if not has_collection and not has_additional_name and not has_nomenclature:
-        return df
-
-    filtered_df = df.copy()
-
-    # 1. Article type filter FIRST (checkbox expander)
-    if has_nomenclature:
-        # Get all unique article types for comparison
-        all_article_types = set(
-            v for v in df[PRODUCT_NAME_COLUMN].apply(_extract_article_name).unique()
-            if v.strip()
-        )
-        selected_types = _render_article_type_filter(df, prefix)
-        if selected_types:
-            # If all types are selected, include rows with empty article type too
-            if set(selected_types) == all_article_types:
-                # No filtering needed - all types selected
-                pass
-            else:
-                filtered_df = filtered_df[
-                    filtered_df[PRODUCT_NAME_COLUMN].apply(_extract_article_name).isin(selected_types)
-                ]
-
-    # 2. Collection filter (multiselect)
-    if has_collection:
-        unique_collections = df[COLLECTION_COLUMN].dropna().unique().tolist()
-        unique_collections = [_format_filter_value(v) for v in unique_collections]
-        unique_collections = [v for v in unique_collections if v.strip()]
-        unique_collections.sort()
-
-        if unique_collections:
-            selected_collections = st.multiselect(
-                f"Фильтр по {COLLECTION_COLUMN}",
-                options=unique_collections,
-                default=[],
-                key=f"{prefix}_filter_collection",
-                placeholder="Выберите...",
-                help="Оставьте пустым, чтобы включить всё"
-            )
-            if selected_collections:
-                filtered_df = filtered_df[
-                    filtered_df[COLLECTION_COLUMN].apply(_format_filter_value).isin(selected_collections)
-                ]
-
-    # 3. Additional name filter (multiselect)
-    if has_additional_name:
-        unique_names = df[ADDITIONAL_NAME_COLUMN].dropna().unique().tolist()
-        unique_names = [_format_filter_value(v) for v in unique_names]
-        unique_names = [v for v in unique_names if v.strip()]
-        unique_names.sort()
-
-        if unique_names:
-            selected_names = st.multiselect(
-                f"Фильтр по {ADDITIONAL_NAME_COLUMN}",
-                options=unique_names,
-                default=[],
-                key=f"{prefix}_filter_additional_name",
-                placeholder="Выберите...",
-                help="Оставьте пустым, чтобы включить всё"
-            )
-            if selected_names:
-                filtered_df = filtered_df[
-                    filtered_df[ADDITIONAL_NAME_COLUMN].apply(_format_filter_value).isin(selected_names)
-                ]
-
-    # Show filter summary
-    if len(filtered_df) != len(df):
-        st.info(f"Отфильтровано: {len(filtered_df)} из {len(df)} строк")
-
-    return filtered_df
-
-
-def find_header_row(file, max_rows: int = 20) -> tuple[int | None, str | None]:
-    """Automatically find the header row by searching for the product name column.
-
-    Args:
-        file: Uploaded file object
-        max_rows: Maximum rows to search
-
-    Returns:
-        Tuple of (header_row_index, error_message)
-        If found: (row_index, None)
-        If not found: (None, error_message)
-    """
-    try:
-        # Read first max_rows without header
-        preview_df = pd.read_excel(file, header=None, nrows=max_rows)
-
-        # Search for the row containing the product name column
-        for idx, row in preview_df.iterrows():
-            row_values = [str(v) for v in row.values if pd.notna(v)]
-            if PRODUCT_NAME_COLUMN in row_values:
-                # Reset file pointer for subsequent reads
-                file.seek(0)
-                return int(idx), None
-
-        # Not found
-        file.seek(0)
-        return None, f"Строка заголовка с '{PRODUCT_NAME_COLUMN}' не найдена в первых {max_rows} строках"
-
-    except Exception as e:
-        file.seek(0)
-        return None, f"Ошибка чтения файла: {e}"
-
-
 def get_config() -> DistributionConfig:
-    """Create config from current session state."""
+    """Create config from current session state.
+    
+    Returns:
+        DistributionConfig with current settings
+    """
     return DistributionConfig(
-        store_priority=st.session_state.store_priority.copy(),
-        excluded_stores=st.session_state.excluded_stores.copy(),
+        store_priority=st.session_state.store_priority,
+        excluded_stores=st.session_state.excluded_stores,
         balance_threshold=st.session_state.balance_threshold,
     )
 
 
-def generate_problems_excel(previews: list[TransferPreview]) -> tuple[bytes, int]:
-    """Generate Excel with problem cases from previews.
-    
-    Returns:
-        Tuple of (excel_bytes, problem_count)
-    """
-    problems = []
-    
-    for p in previews:
-        if not p.has_transfers:
-            continue
-            
-        # Fallback priority (product not in sales data)
-        if p.uses_fallback_priority:
-            problems.append({
-                "Строка": p.row_index,
-                "Артикул": p.product_name,
-                "Вариант": p.variant or "—",
-                "Проблема": "📊 Fallback",
-                "Магазин": "—",
-                "Детали": "Товар не найден в данных продаж",
-            })
-        
-        # Standard distribution (<4 sizes)
-        if p.uses_standard_distribution:
-            problems.append({
-                "Строка": p.row_index,
-                "Артикул": p.product_name,
-                "Вариант": p.variant or "—",
-                "Проблема": "ℹ️ Standard",
-                "Магазин": "—",
-                "Детали": "<4 размеров — стандартное распределение",
-            })
-        
-        # Skipped stores
-        for skipped in p.skipped_stores:
-            store_id = skipped.store_name.split()[0] if skipped.store_name else skipped.store_name
-            
-            if skipped.reason == "min_sizes":
-                problems.append({
-                    "Строка": p.row_index,
-                    "Артикул": p.product_name,
-                    "Вариант": p.variant or "—",
-                    "Проблема": "📉 Min-Sizes",
-                    "Магазин": store_id,
-                    "Детали": "Недостаточно размеров для этого магазина",
-                })
-            elif skipped.reason == "excluded":
-                problems.append({
-                    "Строка": p.row_index,
-                    "Артикул": p.product_name,
-                    "Вариант": p.variant or "—",
-                    "Проблема": "🚫 Excluded",
-                    "Магазин": store_id,
-                    "Детали": "Магазин исключён из распределения",
-                })
-    
-    if not problems:
-        return b"", 0
-    
-    df = pd.DataFrame(problems)
-    excel_buffer = io.BytesIO()
-    df.to_excel(excel_buffer, index=False, sheet_name="Проблемы")
-    return excel_buffer.getvalue(), len(problems)
-
-
-def render_preview(previews: list[TransferPreview], prefix: str = "default"):
-    """Render the preview section with per-row status icons.
-
-    Args:
-        previews: List of transfer previews to display
-        prefix: Unique prefix for widget keys to avoid duplicate IDs
-    """
-    # Calculate all counts
-    total_rows = len(previews)
-    rows_with_transfers = sum(1 for p in previews if p.has_transfers)
-    total_transfers = sum(len(p.transfers) for p in previews)
-    total_quantity = sum(p.total_quantity for p in previews)
-    
-    # Indicator counts (for rows with transfers only)
-    fallback_count = sum(1 for p in previews if p.uses_fallback_priority and p.has_transfers)
-    min_sizes_count = sum(1 for p in previews if p.min_sizes_skipped and p.has_transfers)
-    standard_count = sum(1 for p in previews if p.uses_standard_distribution and p.has_transfers)
-    excluded_count = sum(1 for p in previews if any(s.reason == "excluded" for s in p.skipped_stores) and p.has_transfers)
-
-    # Basic metrics row
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Всего строк", total_rows)
-    col2.metric("Строк с перемещениями", rows_with_transfers)
-    col3.metric("Перемещения", total_transfers)
-    col4.metric("Всего единиц", total_quantity)
-
-    # Filter options
-    show_only_transfers = st.checkbox(
-        "Показать только строки с перемещениями",
-        value=True,
-        key=f"{prefix}_show_only_transfers"
-    )
-    
-    # Indicator filter row (compact checkboxes) - whitelist: check to show ONLY these
-    st.caption("Фильтр по индикаторам (✓ = показать только эти):")
-    icol1, icol2, icol3, icol4, icol5 = st.columns(5)
-    only_fallback = icol1.checkbox(f"📊 Fallback ({fallback_count})", value=False, key=f"{prefix}_filter_fallback")
-    only_min_sizes = icol2.checkbox(f"📉 Min-Sizes ({min_sizes_count})", value=False, key=f"{prefix}_filter_min_sizes")
-    only_standard = icol3.checkbox(f"ℹ️ Standard ({standard_count})", value=False, key=f"{prefix}_filter_standard")
-    only_excluded = icol4.checkbox(f"🚫 Excluded ({excluded_count})", value=False, key=f"{prefix}_filter_excluded")
-    
-    # Problems download button
-    problems_excel, problem_count = generate_problems_excel(previews)
-    if problem_count > 0:
-        icol5.download_button(
-            label=f"📋 ({problem_count})",
-            data=problems_excel,
-            file_name=f"problems_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key=f"{prefix}_download_problems",
-        )
-    
-    # Check if any filter is active
-    any_filter_active = only_fallback or only_min_sizes or only_standard or only_excluded
-
-    # Display previews
-    displayed = 0
-    for preview in previews:
-        if show_only_transfers and not preview.has_transfers:
-            continue
-        
-        # Apply indicator filters (whitelist: show ONLY rows matching checked indicators)
-        has_excluded = any(s.reason == "excluded" for s in preview.skipped_stores)
-        if any_filter_active:
-            matches_filter = (
-                (only_fallback and preview.uses_fallback_priority) or
-                (only_min_sizes and preview.min_sizes_skipped) or
-                (only_standard and preview.uses_standard_distribution) or
-                (only_excluded and has_excluded)
-            )
-            if not matches_filter:
-                continue
-
-        displayed += 1
-        variant_text = f" / {preview.variant}" if preview.variant else ""
-
-        # Build multiple icons for header (all applicable icons shown)
-        icons = []
-        if preview.min_sizes_skipped:
-            icons.append("📉")  # Min-sizes skip
-        if preview.uses_fallback_priority:
-            icons.append("📊")  # Fallback priority
-        if preview.uses_standard_distribution:
-            icons.append("ℹ️")  # Standard distribution (<4 sizes)
-        row_icons = " ".join(icons)
-        if row_icons:
-            row_icons += " "
-
-        if preview.has_transfers:
-            header = f"{row_icons}Строка {preview.row_index}: {preview.product_name}{variant_text} ({len(preview.transfers)} перемещений)"
-            with st.expander(header.strip(), expanded=False):
-                # Show status reasons if applicable (using st.info for better visibility)
-                if preview.uses_fallback_priority:
-                    st.info("📊 Товар не найден в данных продаж — используется статический приоритет")
-                if preview.uses_standard_distribution:
-                    st.info("ℹ️ <4 размеров — стандартное распределение")
-                
-                # Show skipped stores before transfers (gray styling to distinguish from actual transfers)
-                for skipped in preview.skipped_stores:
-                    store_id = skipped.store_name.split()[0] if skipped.store_name else skipped.store_name
-                    if skipped.reason == "min_sizes":
-                        st.markdown(f'<span style="color: gray">└─ 📉 {store_id} пропущен (недостаточно размеров)</span>', unsafe_allow_html=True)
-                    elif skipped.reason == "has_stock":
-                        st.markdown(f'<span style="color: gray">└─ {store_id} пропущен (уже есть: {skipped.existing_qty} шт.)</span>', unsafe_allow_html=True)
-                    elif skipped.reason == "excluded":
-                        st.markdown(f'<span style="color: gray">└─ 🚫 {store_id} пропущен (исключён)</span>', unsafe_allow_html=True)
-                
-                # Show transfers (prominent styling)
-                for transfer in preview.transfers:
-                    receiver_display = transfer.receiver.split()[0] if transfer.receiver != "Сток" else "Сток"
-                    st.markdown(f"└─ **{transfer.sender}** → **{receiver_display}**: {transfer.quantity} шт.")
-        else:
-            # No transfers - show reason
-            if preview.skip_reason:
-                st.markdown(
-                    f"⚠️ **Строка {preview.row_index}:** {preview.product_name}{variant_text} "
-                    f"— *{preview.skip_reason}*"
-                )
-            else:
-                st.markdown(
-                    f"**Строка {preview.row_index}:** {preview.product_name}{variant_text} "
-                    f"— *(нет распределения)*"
-                )
-
-    if displayed == 0:
-        st.info("Нет перемещений для текущих настроек.")
-
-
-def render_results(results: list[TransferResult]):
-    """Render the download section."""
-    st.success(f"{len(results)} файлов перемещений создано!")
-
-    # Summary
-    total_items = sum(r.item_count for r in results)
-    st.metric("Всего записей", total_items)
-
-    # ZIP download
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-        for result in results:
-            excel_buffer = io.BytesIO()
-            result.data.to_excel(excel_buffer, index=False)
-            zip_file.writestr(result.filename, excel_buffer.getvalue())
-
-    st.download_button(
-        label="Скачать всё в ZIP",
-        data=zip_buffer.getvalue(),
-        file_name=f"transfers_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
-        mime="application/zip",
-        type="primary",
-    )
-
-    st.divider()
-    st.subheader("Отдельные файлы")
-
-    for result in results:
-        col1, col2, col3 = st.columns([3, 1, 1])
-        col1.markdown(f"**{result.filename}**")
-        col2.write(f"{result.item_count} записей")
-
-        excel_buffer = io.BytesIO()
-        result.data.to_excel(excel_buffer, index=False)
-
-        col3.download_button(
-            label="Скачать",
-            data=excel_buffer.getvalue(),
-            file_name=result.filename,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key=f"download_{result.filename}",
-        )
-
-
-# Main UI
+# Title
 st.title("📦 Распределение товаров")
 st.markdown("Распределение товаров по магазинам")
 
