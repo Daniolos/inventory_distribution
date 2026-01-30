@@ -232,15 +232,17 @@ def render_preview(previews: list[TransferPreview], prefix: str = "default"):
     total_transfers = sum(len(p.transfers) for p in previews)
     total_quantity = sum(p.total_quantity for p in previews)
     fallback_count = sum(1 for p in previews if p.uses_fallback_priority and p.has_transfers)
+    min_sizes_skipped_count = sum(1 for p in previews if p.min_sizes_skipped and p.has_transfers)
 
-    # Show metrics - add extra column if sales data is active
+    # Show metrics - add extra columns if sales data is active
     if st.session_state.sales_priority_data:
-        col1, col2, col3, col4, col5 = st.columns(5)
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
         col1.metric("Всего строк", total_rows)
         col2.metric("Строк с перемещениями", rows_with_transfers)
         col3.metric("Перемещения", total_transfers)
         col4.metric("Всего единиц", total_quantity)
         col5.metric("📊 Без данных продаж", fallback_count)
+        col6.metric("📉 Недостаточно размеров", min_sizes_skipped_count)
     else:
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Всего строк", total_rows)
@@ -264,27 +266,39 @@ def render_preview(previews: list[TransferPreview], prefix: str = "default"):
         displayed += 1
         variant_text = f" / {preview.variant}" if preview.variant else ""
 
-        # Determine row icon based on status (priority: warning > fallback > info)
-        if preview.has_warning:
-            row_icon = "⚠️"  # Warning - skipped due to min-sizes rule
-        elif preview.uses_fallback_priority:
-            row_icon = "📊"  # Fallback - product not found in sales data
-        elif preview.has_info:
-            row_icon = "ℹ️"  # Info - using standard distribution (<4 sizes)
-        else:
-            row_icon = ""
+        # Build multiple icons for header (all applicable icons shown)
+        icons = []
+        if preview.min_sizes_skipped:
+            icons.append("📉")  # Min-sizes skip
+        if preview.uses_fallback_priority:
+            icons.append("📊")  # Fallback priority
+        if preview.uses_standard_distribution:
+            icons.append("ℹ️")  # Standard distribution (<4 sizes)
+        row_icons = " ".join(icons)
+        if row_icons:
+            row_icons += " "
 
         if preview.has_transfers:
-            header = f"{row_icon} Строка {preview.row_index}: {preview.product_name}{variant_text} ({len(preview.transfers)} перемещений)"
+            header = f"{row_icons}Строка {preview.row_index}: {preview.product_name}{variant_text} ({len(preview.transfers)} перемещений)"
             with st.expander(header.strip(), expanded=False):
-                # Show status reason if applicable
+                # Show status reasons if applicable
                 if preview.uses_fallback_priority:
                     st.caption("📊 Товар не найден в данных продаж — используется статический приоритет")
                 if preview.uses_standard_distribution:
                     st.caption("ℹ️ <4 размеров — стандартное распределение")
+                
+                # Show skipped stores before transfers
+                for skipped in preview.skipped_stores:
+                    store_id = skipped.store_name.split()[0] if skipped.store_name else skipped.store_name
+                    if skipped.reason == "min_sizes":
+                        st.markdown(f"└─ 📉 **{store_id}** пропущен *(недостаточно размеров)*")
+                    elif skipped.reason == "has_stock":
+                        st.markdown(f"└─ **{store_id}** пропущен *(уже есть: {skipped.existing_qty} шт.)*")
+                
+                # Show transfers
                 for transfer in preview.transfers:
                     receiver_display = transfer.receiver.split()[0] if transfer.receiver != "Сток" else "Сток"
-                    st.markdown(f"  └─ **{transfer.sender}** → **{receiver_display}**: {transfer.quantity} шт.")
+                    st.markdown(f"└─ **{transfer.sender}** → **{receiver_display}**: {transfer.quantity} шт.")
         else:
             # No transfers - show reason
             if preview.skip_reason:

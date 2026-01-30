@@ -142,6 +142,14 @@ class Transfer:
 
 
 @dataclass
+class SkippedStore:
+    """Represents a store that was skipped during distribution."""
+    store_name: str      # Full store name (e.g., "125007 MSK-PC-Гагаринский")
+    reason: str          # "has_stock" or "min_sizes"
+    existing_qty: int = 0  # Number of existing pieces (for has_stock reason)
+
+
+@dataclass
 class TransferPreview:
     """Preview of transfers for a single product row."""
     row_index: int
@@ -149,10 +157,14 @@ class TransferPreview:
     variant: str
     transfers: list[Transfer] = field(default_factory=list)
     
+    # Skipped stores tracking
+    skipped_stores: list[SkippedStore] = field(default_factory=list)
+    
     # Per-row status indicators
     skip_reason: Optional[str] = None  # e.g., "min_sizes_not_met"
     uses_standard_distribution: bool = False  # Product has <4 sizes
     uses_fallback_priority: bool = False  # Product not found in sales data
+    min_sizes_skipped: bool = False  # Store was skipped due to min-sizes rule
 
     @property
     def total_quantity(self) -> int:

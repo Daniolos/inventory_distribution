@@ -11,6 +11,7 @@ from .models import (
     TransferResult,
     DistributionConfig,
     SalesPriorityData,
+    SkippedStore,
     build_store_id_map,
 )
 from .sales_parser import extract_product_code_from_input
@@ -208,6 +209,10 @@ class StockDistributor:
         skipped_rows_reasons = {}
         # Track products using fallback priority (not found in sales data)
         products_using_fallback = set()
+        # Track skipped stores per row: {original_idx: [SkippedStore, ...]}
+        skipped_stores_per_row: dict[int, list[SkippedStore]] = defaultdict(list)
+        # Track rows with min_sizes_skipped flag
+        min_sizes_skipped_rows = set()
 
         for product, data in product_data.items():
             sizes_in_stock = data["sizes_in_stock"]
@@ -234,11 +239,20 @@ class StockDistributor:
                     # Rule: Need 3 different sizes, "all or nothing"
                     if available_sizes_count < MIN_SIZES_TO_ADD:
                         # Not enough sizes in stock, skip this product/store
-                        # Mark rows with skip reason
+                        # Mark rows with skip reason and track as min_sizes skip
                         for row_data in data["rows"]:
                             if row_data["store_quantities"].get(store, 0) == 0:
                                 if row_data["original_idx"] not in skipped_rows_reasons:
                                     skipped_rows_reasons[row_data["original_idx"]] = f"Недостаточно размеров (есть {available_sizes_count}, нужно ≥3)"
+                                # Track this as a min_sizes skip
+                                min_sizes_skipped_rows.add(row_data["original_idx"])
+                                skipped_stores_per_row[row_data["original_idx"]].append(
+                                    SkippedStore(
+                                        store_name=store,
+                                        reason="min_sizes",
+                                        existing_qty=0
+                                    )
+                                )
                         continue
 
                     # Find rows with stock that store doesn't have
@@ -271,9 +285,20 @@ class StockDistributor:
                 else:
                     # Rule: Normal distribution - 1 item per variant with 0 stock
                     for row_data in data["rows"]:
-                        if (row_data["store_quantities"].get(store, 0) == 0 and
-                            remaining_stock[row_data["original_idx"]] > 0):
-
+                        store_qty = row_data["store_quantities"].get(store, 0)
+                        
+                        # Track skipped stores that already have stock
+                        if store_qty > 0:
+                            skipped_stores_per_row[row_data["original_idx"]].append(
+                                SkippedStore(
+                                    store_name=store,
+                                    reason="has_stock",
+                                    existing_qty=store_qty
+                                )
+                            )
+                            continue
+                        
+                        if remaining_stock[row_data["original_idx"]] > 0:
                             # Create or get preview for this row
                             if row_data["original_idx"] not in previews_dict:
                                 previews_dict[row_data["original_idx"]] = TransferPreview(
@@ -312,6 +337,14 @@ class StockDistributor:
             # Check if this product uses fallback priority (not found in sales data)
             if preview.product_name in products_using_fallback:
                 preview.uses_fallback_priority = True
+            
+            # Set min_sizes_skipped flag
+            if original_idx in min_sizes_skipped_rows:
+                preview.min_sizes_skipped = True
+            
+            # Set skipped stores list
+            if original_idx in skipped_stores_per_row:
+                preview.skipped_stores = skipped_stores_per_row[original_idx]
 
         # Sort by row index and return
         previews = sorted(previews_dict.values(), key=lambda p: p.row_index)
