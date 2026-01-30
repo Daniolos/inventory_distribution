@@ -106,13 +106,6 @@ def render_preview(previews: list[TransferPreview], prefix: str = "default"):
     col3.metric("Перемещения", total_transfers)
     col4.metric("Всего единиц", total_quantity)
 
-    # Filter options
-    show_only_transfers = st.checkbox(
-        "Показать только строки с перемещениями",
-        value=True,
-        key=f"{prefix}_show_only_transfers"
-    )
-    
     # Indicator filter row (compact checkboxes) - whitelist: check to show ONLY these
     st.caption("Фильтр по индикаторам (✓ = показать только эти):")
     icol1, icol2, icol3, icol4 = st.columns(4)
@@ -123,13 +116,13 @@ def render_preview(previews: list[TransferPreview], prefix: str = "default"):
         help="Товар не найден в данных продаж — используется статический приоритет"
     )
     only_min_sizes = icol2.checkbox(
-        f"📉 Недост. размеров ({min_sizes_count})",
+        f"📉 Недост. разм. ({min_sizes_count})",
         value=False,
         key=f"{prefix}_filter_min_sizes",
         help="Магазин пропущен, т.к. недостаточно размеров для выполнения правила минимальных размеров"
     )
     only_standard = icol3.checkbox(
-        f"🔢 < 4 размеров ({standard_count})",
+        f"🔢 < 4 разм. ({standard_count})",
         value=False,
         key=f"{prefix}_filter_standard",
         help="Менее 4 размеров для артикула — правило минимальных размеров не применяется"
@@ -153,7 +146,14 @@ def render_preview(previews: list[TransferPreview], prefix: str = "default"):
             type="primary",
             use_container_width=True,
         )
-    
+
+    # Filter to show only rows with transfers (placed after download button, before row list)
+    show_only_transfers = st.checkbox(
+        "Показать только строки с перемещениями",
+        value=True,
+        key=f"{prefix}_show_only_transfers"
+    )
+
     # Check if any filter is active
     any_filter_active = only_fallback or only_min_sizes or only_standard or only_excluded
 
