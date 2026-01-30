@@ -294,6 +294,8 @@ def render_preview(previews: list[TransferPreview], prefix: str = "default"):
                         st.markdown(f'<span style="color: gray">└─ 📉 {store_id} пропущен (недостаточно размеров)</span>', unsafe_allow_html=True)
                     elif skipped.reason == "has_stock":
                         st.markdown(f'<span style="color: gray">└─ {store_id} пропущен (уже есть: {skipped.existing_qty} шт.)</span>', unsafe_allow_html=True)
+                    elif skipped.reason == "excluded":
+                        st.markdown(f'<span style="color: gray">└─ 🚫 {store_id} пропущен (исключён)</span>', unsafe_allow_html=True)
                 
                 # Show transfers (prominent styling)
                 for transfer in preview.transfers:

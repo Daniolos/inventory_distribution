@@ -55,7 +55,7 @@ class StockDistributor:
         self,
         product_name: str,
         available_stores: list[str]
-    ) -> tuple[list[str], bool]:
+    ) -> tuple[list[str], bool, list[str]]:
         """
         Get store priority for a specific product.
 
@@ -64,18 +64,24 @@ class StockDistributor:
             available_stores: List of stores that exist in the DataFrame
 
         Returns:
-            Tuple of (active_store_list_in_priority_order, uses_fallback)
+            Tuple of (active_store_list_in_priority_order, uses_fallback, full_priority_with_excluded)
+            - active_store_list: Only non-excluded stores
+            - uses_fallback: True if product not found in sales data
+            - full_priority_with_excluded: Full ordered list including excluded stores
         """
-        # Default: use static priority
+        # Build full priority list (including excluded stores)
+        full_priority = [s for s in self.config.store_priority if s in available_stores]
+        
+        # Default: use static priority (filtered to active stores only)
         fallback_priority = [s for s in self.config.active_stores if s in available_stores]
 
         if not self.sales_data:
-            return fallback_priority, False
+            return fallback_priority, False, full_priority
 
         # Extract product code from input file format
         product_code = extract_product_code_from_input(product_name)
         if not product_code:
-            return fallback_priority, True
+            return fallback_priority, True, full_priority
 
         # Look up in sales data
         priority, found = self.sales_data.get_product_priority(
@@ -85,17 +91,25 @@ class StockDistributor:
         )
 
         if not found:
-            return fallback_priority, True
+            return fallback_priority, True, full_priority
 
         # Filter to available stores only and maintain sales-based order
         active_priority = [s for s in priority if s in available_stores and s in self.config.active_stores]
+        
+        # Build full priority with excluded (same order as sales-based, but include excluded)
+        full_priority_sales = [s for s in priority if s in available_stores]
 
         # Add any stores that weren't in sales data but are in available/active
         for store in fallback_priority:
             if store not in active_priority:
                 active_priority.append(store)
+        
+        # Add stores not in sales data to full priority too
+        for store in full_priority:
+            if store not in full_priority_sales:
+                full_priority_sales.append(store)
 
-        return active_priority, False
+        return active_priority, False, full_priority_sales
 
     def _get_source_column(self, source: str) -> str:
         """Get the column name for the source."""
@@ -223,12 +237,32 @@ class StockDistributor:
             if total_product_sizes < 4:
                 products_under_4_sizes.add(product)
 
-            # Get product-specific store priority
-            product_stores, uses_fallback = self._get_product_priority(product, available_stores)
+            # Get product-specific store priority (including full list with excluded)
+            product_stores, uses_fallback, full_priority = self._get_product_priority(product, available_stores)
             if uses_fallback and self.sales_data:
                 products_using_fallback.add(product)
+            
+            # Track excluded stores that appear before active stores in priority
+            excluded_stores = set(self.config.excluded_stores)
+            
+            # Build a map of position in full priority for tracking skips
+            store_processed = set()
 
-            for store in product_stores:
+            for store in full_priority:
+                # Check if store is excluded - if so, track as skipped and continue
+                if store in excluded_stores:
+                    # Only track excluded stores for rows where they would have been relevant
+                    for row_data in data["rows"]:
+                        if row_data["store_quantities"].get(store, 0) == 0:
+                            skipped_stores_per_row[row_data["original_idx"]].append(
+                                SkippedStore(
+                                    store_name=store,
+                                    reason="excluded",
+                                    existing_qty=0
+                                )
+                            )
+                    continue
+                
                 store_sizes_count = self._get_store_sizes_count(data["rows"], store)
 
                 # Determine which rule to apply
