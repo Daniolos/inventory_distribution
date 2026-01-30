@@ -18,6 +18,13 @@ DEFAULT_STORE_PRIORITY = [
 # Default excluded stores
 DEFAULT_EXCLUDED_STORES = []
 
+# Store pairs that can balance between each other before sending to Stock
+# Each pair is a tuple of two store ID prefixes (the numeric codes)
+STORE_BALANCE_PAIRS: list[tuple[str, str]] = [
+    ("125004", "125005"),  # EKT-PC-Гринвич <-> EKT-PC-Мега
+    ("125008", "129877"),  # MSK-PC-РИО Ленинский <-> MSK-PC-Мега 1 Теплый Стан
+]
+
 # Default balance threshold
 DEFAULT_BALANCE_THRESHOLD = 2
 

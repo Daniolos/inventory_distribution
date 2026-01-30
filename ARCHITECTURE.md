@@ -30,6 +30,17 @@ tests/                    # Pytest Tests
 - `preview(df, header_row)` → List[TransferPreview]
 - `execute(df, header_row)` → List[TransferResult]
 
+**Balancing Logic:**
+- Excess (> threshold) goes directly to Stock
+- Exception: Store pairs (125004↔125005, 125008↔129877) can balance between each other first
+- If partner has 0 inventory: 1 item to partner, rest to Stock
+- If partner has inventory: all to Stock
+
+### `core/config.py`
+- `DEFAULT_STORE_PRIORITY` - Default store order
+- `DEFAULT_EXCLUDED_STORES` - Default excluded stores
+- `STORE_BALANCE_PAIRS` - Store pairs that can balance between each other
+
 ### `core/file_loader.py`
 - `find_header_row(file)` - Auto-detects header row
 - `load_excel_with_header(file)` - Loads with header detection
@@ -40,6 +51,12 @@ tests/                    # Pytest Tests
 
 ### `core/models.py`
 Dataclasses: `Transfer`, `TransferPreview`, `TransferResult`, `DistributionConfig`, `UpdatedInventoryResult`
+
+**DistributionConfig** fields:
+- `store_priority` - Store priority order
+- `excluded_stores` - Stores excluded from distribution
+- `balance_threshold` - Threshold for balancing (default: 2)
+- `store_balance_pairs` - Pairs of stores that can balance between each other
 
 ### `core/inventory_updater.py`
 - `apply_transfers_to_inventory(file, previews, source_col, header_row)` → (bytes, warnings)

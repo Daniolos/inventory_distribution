@@ -3,24 +3,40 @@
 import pytest
 import pandas as pd
 from core.models import DistributionConfig
+from core.config import STORE_BALANCE_PAIRS
 
 # Store columns used in tests (subset for simplicity)
+# Includes both paired and unpaired stores
+# Note: 125007 must be first to maintain backwards compatibility with existing tests
 STORE_COLS = [
-    "125007 MSK-PC-Гагаринский",
-    "125008 MSK-PC-РИО Ленинский",
-    "129877 MSK-PC-Мега 1 Теплый Стан",
-    "130143 MSK-PCM-Мега 2 Химки",
-    "150002 MSK-DV-Капитолий",
+    "125007 MSK-PC-Гагаринский",       # Not paired (first for test compatibility)
+    "125004 EKT-PC-Гринвич",           # Paired with 125005
+    "125005 EKT-PC-Мега",              # Paired with 125004
+    "125008 MSK-PC-РИО Ленинский",     # Paired with 129877
+    "129877 MSK-PC-Мега 1 Теплый Стан",  # Paired with 125008
+    "130143 MSK-PCM-Мега 2 Химки",     # Not paired
+    "150002 MSK-DV-Капитолий",         # Not paired
 ]
 
 
 @pytest.fixture
 def config():
-    """Standard DistributionConfig for tests."""
+    """Standard DistributionConfig for tests (without store pairs)."""
     return DistributionConfig(
         store_priority=STORE_COLS,
         excluded_stores=[],
         balance_threshold=2,
+    )
+
+
+@pytest.fixture
+def config_with_pairs():
+    """DistributionConfig with store balance pairs configured."""
+    return DistributionConfig(
+        store_priority=STORE_COLS,
+        excluded_stores=[],
+        balance_threshold=2,
+        store_balance_pairs=STORE_BALANCE_PAIRS,
     )
 
 

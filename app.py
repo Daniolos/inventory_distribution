@@ -19,6 +19,7 @@ from core.config import (
     VARIANT_COLUMN,
     STOCK_COLUMN,
     PHOTO_STOCK_COLUMN,
+    STORE_BALANCE_PAIRS,
 )
 from ui import (
     init_session_state,
@@ -68,7 +69,7 @@ def validate_file(df: pd.DataFrame) -> tuple[bool, list[str]]:
 
 def get_config() -> DistributionConfig:
     """Create config from current session state.
-    
+
     Returns:
         DistributionConfig with current settings
     """
@@ -76,6 +77,7 @@ def get_config() -> DistributionConfig:
         store_priority=st.session_state.store_priority,
         excluded_stores=st.session_state.excluded_stores,
         balance_threshold=st.session_state.balance_threshold,
+        store_balance_pairs=STORE_BALANCE_PAIRS,
     )
 
 
@@ -266,8 +268,13 @@ with tab1:
 with tab2:
     st.subheader("Балансировка остатков между магазинами")
     st.markdown("""
-    Распределяет излишки из магазинов с большими остатками в пустые магазины.
-    Оставшиеся излишки возвращаются на **Сток**.
+    Перемещает излишки (> порога) на **Сток**.
+
+    **Исключение:** Пары магазинов могут балансировать между собой:
+    - 125004 (EKT-Гринвич) ↔ 125005 (EKT-Мега)
+    - 125008 (MSK-РИО Ленинский) ↔ 129877 (MSK-Мега Теплый Стан)
+
+    Эти пары сначала передают 1 ед. партнёру (если у него 0), затем остаток идёт на Сток.
     """)
 
     # Threshold setting

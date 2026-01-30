@@ -31,8 +31,8 @@ class InventoryBalancer:
 
     For each row:
     - Find stores with > threshold items
-    - Distribute excess to stores with 0 inventory (priority order)
-    - If all stores have inventory, excess goes to Stock
+    - Excess goes directly to Stock (no distribution to other stores)
+    - Exception: Store pairs can balance between each other first
     - Takes from store with highest inventory first
     """
 
@@ -91,6 +91,22 @@ class InventoryBalancer:
                 active_priority.append(store)
 
         return active_priority, False
+
+    def _find_store_by_code(self, store_code: str, stores: list[str]) -> Optional[str]:
+        """
+        Find full store name by its code prefix.
+
+        Args:
+            store_code: Store ID prefix (e.g., "125004")
+            stores: List of full store names to search
+
+        Returns:
+            Full store name if found, None otherwise
+        """
+        for store in stores:
+            if store.startswith(store_code + " "):
+                return store
+        return None
 
     def preview(self, df: pd.DataFrame, header_row: int = 0) -> list[TransferPreview]:
         """
@@ -153,13 +169,7 @@ class InventoryBalancer:
             # Sort by quantity descending (take from highest first)
             stores_with_excess.sort(key=lambda x: x[1], reverse=True)
 
-            # Find stores that need inventory (qty == 0) - use product-specific priority order
-            stores_needing = [
-                store for store in product_stores
-                if store_inventory.get(store, 0) == 0
-            ]
-
-            # Create a working copy of inventory for tracking
+            # Create a working copy of inventory for tracking paired store balancing
             working_inventory = store_inventory.copy()
 
             # Process each store with excess
@@ -172,22 +182,28 @@ class InventoryBalancer:
                 remaining_excess = excess
                 sender_code = sender_store.split()[0]
 
-                # First: distribute to stores with 0 inventory (in priority order)
-                for receiver_store in stores_needing:
-                    if remaining_excess <= 0:
-                        break
+                # Check if sender is in a balance pair
+                partner_code = self.config.get_paired_store(sender_code)
 
-                    # Check if this store still needs (wasn't filled by another sender)
-                    if working_inventory.get(receiver_store, 0) == 0:
-                        preview.transfers.append(Transfer(
-                            sender=sender_code,
-                            receiver=receiver_store,
-                            quantity=1
-                        ))
-                        working_inventory[receiver_store] = 1  # Mark as filled
-                        remaining_excess -= 1
+                if partner_code:
+                    # Find partner store in available stores
+                    partner_store = self._find_store_by_code(partner_code, product_stores)
 
-                # Second: any remaining excess goes to Stock
+                    if (partner_store and
+                            partner_store not in self.config.excluded_stores):
+                        partner_qty = working_inventory.get(partner_store, 0)
+
+                        # Only send to partner if they have 0 inventory
+                        if partner_qty == 0 and remaining_excess > 0:
+                            preview.transfers.append(Transfer(
+                                sender=sender_code,
+                                receiver=partner_store,
+                                quantity=1
+                            ))
+                            working_inventory[partner_store] = 1
+                            remaining_excess -= 1
+
+                # All remaining excess goes to Stock (paired or not)
                 if remaining_excess > 0:
                     preview.transfers.append(Transfer(
                         sender=sender_code,

@@ -226,6 +226,7 @@ class DistributionConfig:
     store_priority: list[str] = field(default_factory=list)
     excluded_stores: list[str] = field(default_factory=list)
     balance_threshold: int = 2
+    store_balance_pairs: list[tuple[str, str]] = field(default_factory=list)
 
     # Column names
     stock_column: str = "Сток"
@@ -238,19 +239,39 @@ class DistributionConfig:
         """Get stores that are not excluded."""
         return [s for s in self.store_priority if s not in self.excluded_stores]
 
+    def get_paired_store(self, store_code: str) -> Optional[str]:
+        """
+        Get partner store code if this store is in a balance pair.
+
+        Args:
+            store_code: Store ID prefix (e.g., "125004")
+
+        Returns:
+            Partner store code if in a pair, None otherwise
+        """
+        for pair in self.store_balance_pairs:
+            if store_code == pair[0]:
+                return pair[1]
+            elif store_code == pair[1]:
+                return pair[0]
+        return None
+
     def to_dict(self) -> dict:
         """Convert config to dictionary for JSON export."""
         return {
             "store_priority": self.store_priority,
             "excluded_stores": self.excluded_stores,
             "balance_threshold": self.balance_threshold,
+            "store_balance_pairs": [list(pair) for pair in self.store_balance_pairs],
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "DistributionConfig":
         """Create config from dictionary (JSON import)."""
+        pairs = data.get("store_balance_pairs", [])
         return cls(
             store_priority=data.get("store_priority", []),
             excluded_stores=data.get("excluded_stores", []),
             balance_threshold=data.get("balance_threshold", 2),
+            store_balance_pairs=[tuple(pair) for pair in pairs],
         )
