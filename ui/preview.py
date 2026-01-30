@@ -32,7 +32,7 @@ def generate_problems_excel(previews: list[TransferPreview]) -> tuple[bytes, int
                 "Строка": p.row_index,
                 "Артикул": p.product_name,
                 "Вариант": p.variant or "—",
-                "Проблема": "📊 Fallback",
+                "Проблема": "📊 Нет в продажах",
                 "Магазин": "—",
                 "Детали": "Товар не найден в данных продаж",
             })
@@ -43,7 +43,7 @@ def generate_problems_excel(previews: list[TransferPreview]) -> tuple[bytes, int
                 "Строка": p.row_index,
                 "Артикул": p.product_name,
                 "Вариант": p.variant or "—",
-                "Проблема": "ℹ️ Standard",
+                "Проблема": "🔢 < 4 размеров",
                 "Магазин": "—",
                 "Детали": "<4 размеров — стандартное распределение",
             })
@@ -57,7 +57,7 @@ def generate_problems_excel(previews: list[TransferPreview]) -> tuple[bytes, int
                     "Строка": p.row_index,
                     "Артикул": p.product_name,
                     "Вариант": p.variant or "—",
-                    "Проблема": "📉 Min-Sizes",
+                    "Проблема": "📉 Недост. размеров",
                     "Магазин": store_id,
                     "Детали": "Недостаточно размеров для этого магазина",
                 })
@@ -66,7 +66,7 @@ def generate_problems_excel(previews: list[TransferPreview]) -> tuple[bytes, int
                     "Строка": p.row_index,
                     "Артикул": p.product_name,
                     "Вариант": p.variant or "—",
-                    "Проблема": "🚫 Excluded",
+                    "Проблема": "🚫 Исключённые",
                     "Магазин": store_id,
                     "Детали": "Магазин исключён из распределения",
                 })
@@ -76,7 +76,7 @@ def generate_problems_excel(previews: list[TransferPreview]) -> tuple[bytes, int
     
     df = pd.DataFrame(problems)
     excel_buffer = io.BytesIO()
-    df.to_excel(excel_buffer, index=False, sheet_name="Проблемы")
+    df.to_excel(excel_buffer, index=False, sheet_name="Замечания")
     return excel_buffer.getvalue(), len(problems)
 
 
@@ -115,21 +115,43 @@ def render_preview(previews: list[TransferPreview], prefix: str = "default"):
     
     # Indicator filter row (compact checkboxes) - whitelist: check to show ONLY these
     st.caption("Фильтр по индикаторам (✓ = показать только эти):")
-    icol1, icol2, icol3, icol4, icol5 = st.columns(5)
-    only_fallback = icol1.checkbox(f"📊 Fallback ({fallback_count})", value=False, key=f"{prefix}_filter_fallback")
-    only_min_sizes = icol2.checkbox(f"📉 Min-Sizes ({min_sizes_count})", value=False, key=f"{prefix}_filter_min_sizes")
-    only_standard = icol3.checkbox(f"ℹ️ Standard ({standard_count})", value=False, key=f"{prefix}_filter_standard")
-    only_excluded = icol4.checkbox(f"🚫 Excluded ({excluded_count})", value=False, key=f"{prefix}_filter_excluded")
-    
-    # Problems download button
-    problems_excel, problem_count = generate_problems_excel(previews)
-    if problem_count > 0:
-        icol5.download_button(
-            label=f"📋 ({problem_count})",
-            data=problems_excel,
-            file_name=f"problems_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+    icol1, icol2, icol3, icol4 = st.columns(4)
+    only_fallback = icol1.checkbox(
+        f"📊 Нет в продажах ({fallback_count})",
+        value=False,
+        key=f"{prefix}_filter_fallback",
+        help="Товар не найден в данных продаж — используется статический приоритет"
+    )
+    only_min_sizes = icol2.checkbox(
+        f"📉 Недост. размеров ({min_sizes_count})",
+        value=False,
+        key=f"{prefix}_filter_min_sizes",
+        help="Магазин пропущен, т.к. недостаточно размеров для выполнения правила минимальных размеров"
+    )
+    only_standard = icol3.checkbox(
+        f"🔢 < 4 размеров ({standard_count})",
+        value=False,
+        key=f"{prefix}_filter_standard",
+        help="Менее 4 размеров для артикула — правило минимальных размеров не применяется"
+    )
+    only_excluded = icol4.checkbox(
+        f"🚫 Исключённые ({excluded_count})",
+        value=False,
+        key=f"{prefix}_filter_excluded",
+        help="Магазин исключён из распределения"
+    )
+
+    # Remarks download button (full width, separate row, primary style)
+    remarks_excel, remark_count = generate_problems_excel(previews)
+    if remark_count > 0:
+        st.download_button(
+            label=f"Скачать замечания ({remark_count})",
+            data=remarks_excel,
+            file_name=f"remarks_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key=f"{prefix}_download_problems",
+            key=f"{prefix}_download_remarks",
+            type="primary",
+            use_container_width=True,
         )
     
     # Check if any filter is active
@@ -163,7 +185,7 @@ def render_preview(previews: list[TransferPreview], prefix: str = "default"):
         if preview.uses_fallback_priority:
             icons.append("📊")  # Fallback priority
         if preview.uses_standard_distribution:
-            icons.append("ℹ️")  # Standard distribution (<4 sizes)
+            icons.append("🔢")  # Standard distribution (<4 sizes)
         row_icons = " ".join(icons)
         if row_icons:
             row_icons += " "
@@ -175,7 +197,7 @@ def render_preview(previews: list[TransferPreview], prefix: str = "default"):
                 if preview.uses_fallback_priority:
                     st.info("📊 Товар не найден в данных продаж — используется статический приоритет")
                 if preview.uses_standard_distribution:
-                    st.info("ℹ️ <4 размеров — стандартное распределение")
+                    st.info("🔢 < 4 размеров — правило минимальных размеров не применяется")
                 
                 # Show skipped stores before transfers (gray styling to distinguish from actual transfers)
                 for skipped in preview.skipped_stores:
