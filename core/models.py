@@ -44,6 +44,64 @@ def build_store_id_map(store_names: list[str]) -> dict[int, str]:
     return result
 
 
+def get_stock_value(val) -> int:
+    """
+    Convert cell value to integer, treating NaN/empty as 0.
+
+    Used by both StockDistributor and InventoryBalancer.
+    """
+    if pd.isna(val) or val == "" or val == "Остаток на складе":
+        return 0
+    try:
+        return int(float(val))
+    except (ValueError, TypeError):
+        return 0
+
+
+def count_sizes_with_stock(product_rows: list[dict], store: str) -> int:
+    """
+    Count how many different sizes a store has for a product (qty > 0).
+
+    Args:
+        product_rows: List of row dicts with 'variant' and 'store_quantities' keys
+        store: Store name to check
+
+    Returns:
+        Number of unique sizes/variants with stock > 0
+    """
+    sizes_with_stock = set()
+    for row_data in product_rows:
+        if row_data.get("store_quantities", {}).get(store, 0) > 0:
+            sizes_with_stock.add(row_data.get("variant", ""))
+    return len(sizes_with_stock)
+
+
+def should_apply_min_sizes_rule(
+    store_sizes_count: int,
+    total_product_sizes: int,
+    min_sizes_threshold: int = 2,
+    min_product_sizes_for_rule: int = 4
+) -> bool:
+    """
+    Determine if minimum sizes rule should apply.
+
+    Rule applies when:
+    1. Store has < threshold sizes of this product (default: 0-1 sizes)
+    2. Product has enough sizes total (default: 4+ sizes)
+
+    Args:
+        store_sizes_count: Number of sizes store currently has
+        total_product_sizes: Total number of sizes this product has
+        min_sizes_threshold: Store must have fewer than this many sizes (default 2)
+        min_product_sizes_for_rule: Minimum product sizes needed (default 4)
+
+    Returns:
+        True if minimum sizes rule should be applied
+    """
+    return (store_sizes_count < min_sizes_threshold and
+            total_product_sizes >= min_product_sizes_for_rule)
+
+
 @dataclass
 class StoreSales:
     """Sales data for a single store for a specific product."""

@@ -14,23 +14,17 @@ from .models import (
     SkippedStore,
     UpdatedInventoryResult,
     build_store_id_map,
+    get_stock_value,
+    count_sizes_with_stock,
+    should_apply_min_sizes_rule,
 )
 from .sales_parser import extract_product_code_from_input
-from .config import OUTPUT_COLUMNS
-
-# Minimum sizes rule configuration
-MIN_SIZES_THRESHOLD = 2  # If store has <= this many sizes, apply min sizes rule
-MIN_SIZES_TO_ADD = 3     # Number of different sizes to add when rule applies
-
-
-def get_stock_value(val) -> int:
-    """Convert cell value to integer, treating NaN/empty as 0."""
-    if pd.isna(val) or val == "" or val == "Остаток на складе":
-        return 0
-    try:
-        return int(float(val))
-    except (ValueError, TypeError):
-        return 0
+from .config import (
+    OUTPUT_COLUMNS,
+    MIN_SIZES_THRESHOLD,
+    MIN_SIZES_TO_ADD,
+    MIN_PRODUCT_SIZES_FOR_RULE,
+)
 
 
 class StockDistributor:
@@ -174,14 +168,6 @@ class StockDistributor:
 
         return product_data
 
-    def _get_store_sizes_count(self, product_rows: list, store: str) -> int:
-        """Count how many different sizes a store has for a product (qty > 0)."""
-        sizes_with_stock = set()
-        for row_data in product_rows:
-            if row_data["store_quantities"].get(store, 0) > 0:
-                sizes_with_stock.add(row_data["variant"])
-        return len(sizes_with_stock)
-
     def preview(self, df: pd.DataFrame, source: str = "stock", header_row: int = 0) -> list[TransferPreview]:
         """
         Generate preview of distributions without executing.
@@ -264,14 +250,14 @@ class StockDistributor:
                                 )
                             )
                     continue
-                
-                store_sizes_count = self._get_store_sizes_count(data["rows"], store)
+
+                store_sizes_count = count_sizes_with_stock(data["rows"], store)
 
                 # Determine which rule to apply
                 # Minimum sizes rule only applies if:
-                # 1. Store has <= 1 sizes of this product
-                # 2. Product has at least 4 sizes total (otherwise use normal distribution)
-                if store_sizes_count <= 1 and total_product_sizes >= 4:
+                # 1. Store has < MIN_SIZES_THRESHOLD sizes of this product (default: 0-1)
+                # 2. Product has at least MIN_PRODUCT_SIZES_FOR_RULE sizes (default: 4+)
+                if should_apply_min_sizes_rule(store_sizes_count, total_product_sizes):
                     # Rule: Need 3 different sizes, "all or nothing"
                     if available_sizes_count < MIN_SIZES_TO_ADD:
                         # Not enough sizes in stock, skip this product/store

@@ -380,3 +380,191 @@ class TestEdgeCases:
         assert preview.total_quantity == 3
         assert len(preview.transfers) == 1
         assert preview.transfers[0].receiver == "Сток"
+
+
+class TestMinimumSizesRuleInBalancing:
+    """Tests for minimum sizes rule applied to paired store balancing.
+
+    Rule: When paired store wants to send to partner:
+    - If partner has 0-1 sizes of this product AND product has 4+ sizes total
+    - Only transfer if 3+ sizes can be transferred (all-or-nothing)
+    - If <3 sizes available from sender -> send everything to Stock instead
+    """
+
+    def test_partner_0_sizes_sender_3plus_transfers_all(self, config_with_pairs):
+        """Partner has 0 sizes, sender can provide 3+ sizes -> all transfer to partner.
+
+        Product has 4 sizes, 125004 has excess in all 4, 125005 has 0.
+        -> All 4 sizes should transfer to partner (each 1 item).
+        """
+        rows = [
+            create_test_row("Product A", "Size S", store_quantities={
+                "125004 EKT-PC-Гринвич": 5, "125005 EKT-PC-Мега": 0
+            }),
+            create_test_row("Product A", "Size M", store_quantities={
+                "125004 EKT-PC-Гринвич": 4, "125005 EKT-PC-Мега": 0
+            }),
+            create_test_row("Product A", "Size L", store_quantities={
+                "125004 EKT-PC-Гринвич": 3, "125005 EKT-PC-Мега": 0
+            }),
+            create_test_row("Product A", "Size XL", store_quantities={
+                "125004 EKT-PC-Гринвич": 4, "125005 EKT-PC-Мега": 0
+            }),
+        ]
+        df = create_test_df(rows)
+
+        balancer = InventoryBalancer(config_with_pairs)
+        previews = balancer.preview(df, header_row=7)
+
+        # Partner should receive all 4 sizes (1 of each)
+        transfers_to_partner = []
+        for preview in previews:
+            for transfer in preview.transfers:
+                if "125005" in transfer.receiver:
+                    transfers_to_partner.append(transfer)
+
+        assert len(transfers_to_partner) == 4
+
+    def test_partner_0_sizes_sender_only_2_all_to_stock(self, config_with_pairs):
+        """Partner has 0 sizes, sender can only provide 2 sizes -> all to Stock.
+
+        Product has 4 sizes, but 125004 has excess in only 2 sizes.
+        -> Nothing to partner (min 3 required), all to Stock.
+        """
+        rows = [
+            create_test_row("Product B", "Size S", store_quantities={
+                "125004 EKT-PC-Гринвич": 5, "125005 EKT-PC-Мега": 0
+            }),
+            create_test_row("Product B", "Size M", store_quantities={
+                "125004 EKT-PC-Гринвич": 4, "125005 EKT-PC-Мега": 0
+            }),
+            # These sizes don't have excess (at or below threshold)
+            create_test_row("Product B", "Size L", store_quantities={
+                "125004 EKT-PC-Гринвич": 2, "125005 EKT-PC-Мега": 0
+            }),
+            create_test_row("Product B", "Size XL", store_quantities={
+                "125004 EKT-PC-Гринвич": 1, "125005 EKT-PC-Мега": 0
+            }),
+        ]
+        df = create_test_df(rows)
+
+        balancer = InventoryBalancer(config_with_pairs)
+        previews = balancer.preview(df, header_row=7)
+
+        # No transfers to partner (only 2 sizes with excess)
+        transfers_to_partner = []
+        transfers_to_stock = []
+        for preview in previews:
+            for transfer in preview.transfers:
+                if "125005" in transfer.receiver:
+                    transfers_to_partner.append(transfer)
+                elif transfer.receiver == "Сток":
+                    transfers_to_stock.append(transfer)
+
+        assert len(transfers_to_partner) == 0
+        # All excess goes to Stock: (5-2) + (4-2) = 3 + 2 = 5
+        total_to_stock = sum(t.quantity for t in transfers_to_stock)
+        assert total_to_stock == 5
+
+    def test_partner_2_sizes_normal_rule_applies(self, config_with_pairs):
+        """Partner already has 2 sizes -> minimum sizes rule doesn't apply.
+
+        125005 has 2 sizes, so normal rule applies (1 item per empty variant).
+        """
+        rows = [
+            create_test_row("Product C", "Size S", store_quantities={
+                "125004 EKT-PC-Гринвич": 5, "125005 EKT-PC-Мега": 1
+            }),
+            create_test_row("Product C", "Size M", store_quantities={
+                "125004 EKT-PC-Гринвич": 4, "125005 EKT-PC-Мега": 1
+            }),
+            create_test_row("Product C", "Size L", store_quantities={
+                "125004 EKT-PC-Гринвич": 5, "125005 EKT-PC-Мега": 0
+            }),
+            create_test_row("Product C", "Size XL", store_quantities={
+                "125004 EKT-PC-Гринвич": 4, "125005 EKT-PC-Мега": 0
+            }),
+        ]
+        df = create_test_df(rows)
+
+        balancer = InventoryBalancer(config_with_pairs)
+        previews = balancer.preview(df, header_row=7)
+
+        # Partner has 2 sizes already, normal rule applies
+        # Partner receives Size L and Size XL (those with 0 inventory)
+        transfers_to_partner = []
+        for preview in previews:
+            for transfer in preview.transfers:
+                if "125005" in transfer.receiver:
+                    transfers_to_partner.append(transfer)
+
+        # Should receive 2 sizes (L and XL where partner has 0)
+        assert len(transfers_to_partner) == 2
+
+    def test_product_less_than_4_sizes_no_min_rule(self, config_with_pairs):
+        """Product has <4 sizes -> minimum sizes rule doesn't apply.
+
+        Product has only 3 sizes, so standard balancing applies.
+        """
+        rows = [
+            create_test_row("Product D", "Size S", store_quantities={
+                "125004 EKT-PC-Гринвич": 5, "125005 EKT-PC-Мега": 0
+            }),
+            create_test_row("Product D", "Size M", store_quantities={
+                "125004 EKT-PC-Гринвич": 4, "125005 EKT-PC-Мега": 0
+            }),
+            create_test_row("Product D", "Size L", store_quantities={
+                "125004 EKT-PC-Гринвич": 5, "125005 EKT-PC-Мега": 0
+            }),
+        ]
+        df = create_test_df(rows)
+
+        balancer = InventoryBalancer(config_with_pairs)
+        previews = balancer.preview(df, header_row=7)
+
+        # Product has <4 sizes, standard rule applies
+        # Partner receives 1 item per size (normal behavior)
+        transfers_to_partner = []
+        for preview in previews:
+            for transfer in preview.transfers:
+                if "125005" in transfer.receiver:
+                    transfers_to_partner.append(transfer)
+
+        # All 3 sizes should transfer (min rule doesn't apply for <4 sizes)
+        assert len(transfers_to_partner) == 3
+
+    def test_partner_has_1_size_sender_3plus_transfers(self, config_with_pairs):
+        """Partner has 1 size, sender can provide 3+ sizes -> transfers happen.
+
+        Partner has 1 size (< MIN_SIZES_THRESHOLD=2), so min rule applies.
+        Sender has 3+ sizes with excess -> all transfer.
+        """
+        rows = [
+            create_test_row("Product E", "Size S", store_quantities={
+                "125004 EKT-PC-Гринвич": 5, "125005 EKT-PC-Мега": 1  # Partner has this
+            }),
+            create_test_row("Product E", "Size M", store_quantities={
+                "125004 EKT-PC-Гринвич": 4, "125005 EKT-PC-Мега": 0
+            }),
+            create_test_row("Product E", "Size L", store_quantities={
+                "125004 EKT-PC-Гринвич": 5, "125005 EKT-PC-Мега": 0
+            }),
+            create_test_row("Product E", "Size XL", store_quantities={
+                "125004 EKT-PC-Гринвич": 4, "125005 EKT-PC-Мега": 0
+            }),
+        ]
+        df = create_test_df(rows)
+
+        balancer = InventoryBalancer(config_with_pairs)
+        previews = balancer.preview(df, header_row=7)
+
+        # Partner has 1 size, min rule applies
+        # Sender has 3 sizes with excess where partner has 0 -> transfers happen
+        transfers_to_partner = []
+        for preview in previews:
+            for transfer in preview.transfers:
+                if "125005" in transfer.receiver:
+                    transfers_to_partner.append(transfer)
+
+        # Partner receives 3 sizes (M, L, XL - those where partner has 0)
+        assert len(transfers_to_partner) == 3

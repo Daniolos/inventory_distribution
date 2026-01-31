@@ -28,6 +28,13 @@ STORE_BALANCE_PAIRS: list[tuple[str, str]] = [
 # Default balance threshold
 DEFAULT_BALANCE_THRESHOLD = 2
 
+# Minimum sizes rule configuration (shared between distributor and balancer)
+# Rule: If store has 0-1 sizes of a product with 4+ total sizes,
+# only transfer if 3+ sizes are available (all-or-nothing)
+MIN_SIZES_THRESHOLD = 2  # If store has < this many sizes, apply min sizes rule
+MIN_SIZES_TO_ADD = 3     # Minimum number of different sizes required for transfer
+MIN_PRODUCT_SIZES_FOR_RULE = 4  # Product must have at least this many sizes
+
 # Column names (these are fixed based on input format)
 STOCK_COLUMN = "Сток"
 PHOTO_STOCK_COLUMN = "Фото склад"

@@ -10,6 +10,9 @@ from .models import (
     SalesPriorityData,
     extract_store_id,
     build_store_id_map,
+    get_stock_value,
+    count_sizes_with_stock,
+    should_apply_min_sizes_rule,
 )
 from .sales_parser import (
     extract_product_code_from_sales,
@@ -46,6 +49,9 @@ __all__ = [
     "SalesPriorityData",
     "extract_store_id",
     "build_store_id_map",
+    "get_stock_value",
+    "count_sizes_with_stock",
+    "should_apply_min_sizes_rule",
     # Sales parser
     "extract_product_code_from_sales",
     "extract_product_code_from_input",

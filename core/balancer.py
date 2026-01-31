@@ -3,6 +3,7 @@
 import pandas as pd
 from datetime import datetime
 from typing import Optional
+from collections import defaultdict
 
 from .models import (
     Transfer,
@@ -11,18 +12,12 @@ from .models import (
     DistributionConfig,
     SalesPriorityData,
     build_store_id_map,
+    get_stock_value,
+    count_sizes_with_stock,
+    should_apply_min_sizes_rule,
 )
 from .sales_parser import extract_product_code_from_input
-
-
-def get_stock_value(val) -> int:
-    """Convert cell value to integer, treating NaN/empty as 0."""
-    if pd.isna(val) or val == "" or val == "Остаток на складе":
-        return 0
-    try:
-        return int(float(val))
-    except (ValueError, TypeError):
-        return 0
+from .config import MIN_SIZES_TO_ADD
 
 
 class InventoryBalancer:
@@ -33,6 +28,7 @@ class InventoryBalancer:
     - Find stores with > threshold items
     - Excess goes directly to Stock (no distribution to other stores)
     - Exception: Store pairs can balance between each other first
+      - Minimum sizes rule applies: partner needs 3+ sizes if they have 0-1
     - Takes from store with highest inventory first
     """
 
@@ -45,6 +41,51 @@ class InventoryBalancer:
         self.sales_data = sales_data
         # Build store ID to name mapping for matching sales data
         self._store_id_map = build_store_id_map(config.store_priority)
+
+    def _analyze_products(
+        self,
+        df: pd.DataFrame,
+        available_stores: list[str],
+        header_row: int = 0
+    ) -> dict:
+        """
+        Analyze inventory by product to understand size distribution.
+
+        Returns:
+            Dict with product name as key, containing:
+            - rows: list of row dicts with variant, store_quantities, excel_row, original_idx
+            - total_sizes: count of all sizes for this product
+        """
+        product_data: dict = defaultdict(lambda: {"rows": [], "total_sizes": 0})
+
+        for original_idx, row in df.iterrows():
+            product = row[self.config.product_name_column]
+            if pd.isna(product) or product == "":
+                continue
+
+            product_name = str(product)
+            variant = row.get(self.config.variant_column, "")
+            variant_str = str(variant) if pd.notna(variant) else ""
+
+            # Build store quantities for this row
+            store_quantities = {}
+            for store in available_stores:
+                store_quantities[store] = get_stock_value(row.get(store, 0))
+
+            excel_row = header_row + 3 + original_idx
+
+            product_data[product_name]["rows"].append({
+                "excel_row": excel_row,
+                "original_idx": original_idx,
+                "variant": variant_str,
+                "store_quantities": store_quantities,
+            })
+
+        # Calculate total sizes per product
+        for product_name, data in product_data.items():
+            data["total_sizes"] = len(data["rows"])
+
+        return dict(product_data)
 
     def _get_product_priority(
         self,
@@ -129,6 +170,24 @@ class InventoryBalancer:
             if s in df_filtered.columns
         ]
 
+        # Analyze products for minimum sizes rule
+        product_data = self._analyze_products(df_filtered, available_stores, header_row)
+
+        # Track which product/partner combinations have been evaluated for min sizes rule
+        # Key: (product_name, partner_store), Value: bool (can_transfer_to_partner)
+        partner_transfer_decisions: dict[tuple[str, str], bool] = {}
+
+        # Track working inventory across all rows (for paired store balancing)
+        # Key: (product_name, variant, store), Value: current inventory
+        working_inventory: dict[tuple[str, str, str], int] = {}
+
+        # Initialize working inventory from product_data
+        for product_name, data in product_data.items():
+            for row_data in data["rows"]:
+                variant = row_data["variant"]
+                for store, qty in row_data["store_quantities"].items():
+                    working_inventory[(product_name, variant, store)] = qty
+
         previews = []
 
         for idx, (original_idx, row) in enumerate(df_filtered.iterrows()):
@@ -136,20 +195,22 @@ class InventoryBalancer:
             variant = row.get(self.config.variant_column, "")
             product_name = str(product) if pd.notna(product) else ""
 
-            # Calculate Excel row: header_row (0-based) + 3 + original_idx
-            # Breakdown: +1 for 1-based Excel, +1 for header row, +1 for skipped sub-header row
-            # Using original_idx (pandas index) instead of idx to preserve correct row number after filtering
             excel_row = header_row + 3 + original_idx
 
             # Get product-specific store priority
             product_stores, uses_fallback = self._get_product_priority(product_name, available_stores)
 
             preview = TransferPreview(
-                row_index=excel_row,  # Excel row number for display
+                row_index=excel_row,
                 product_name=product_name,
                 variant=str(variant) if pd.notna(variant) else "",
                 uses_fallback_priority=uses_fallback and self.sales_data is not None,
             )
+
+            # Get product info for minimum sizes rule
+            prod_info = product_data.get(product_name, {"rows": [], "total_sizes": 1})
+            total_product_sizes = prod_info["total_sizes"]
+            product_rows = prod_info["rows"]
 
             # Build inventory map for this row
             store_inventory = {}
@@ -169,9 +230,6 @@ class InventoryBalancer:
             # Sort by quantity descending (take from highest first)
             stores_with_excess.sort(key=lambda x: x[1], reverse=True)
 
-            # Create a working copy of inventory for tracking paired store balancing
-            working_inventory = store_inventory.copy()
-
             # Process each store with excess
             for sender_store, sender_qty in stores_with_excess:
                 excess = sender_qty - self.config.balance_threshold
@@ -186,22 +244,53 @@ class InventoryBalancer:
                 partner_code = self.config.get_paired_store(sender_code)
 
                 if partner_code:
-                    # Find partner store in available stores
                     partner_store = self._find_store_by_code(partner_code, product_stores)
 
                     if (partner_store and
                             partner_store not in self.config.excluded_stores):
-                        partner_qty = working_inventory.get(partner_store, 0)
 
-                        # Only send to partner if they have 0 inventory
-                        if partner_qty == 0 and remaining_excess > 0:
-                            preview.transfers.append(Transfer(
-                                sender=sender_code,
-                                receiver=partner_store,
-                                quantity=1
-                            ))
-                            working_inventory[partner_store] = 1
-                            remaining_excess -= 1
+                        decision_key = (product_name, partner_store)
+
+                        # Check if we already evaluated this product/partner combination
+                        if decision_key not in partner_transfer_decisions:
+                            # Evaluate minimum sizes rule for this product/partner
+                            partner_sizes_count = count_sizes_with_stock(product_rows, partner_store)
+
+                            if should_apply_min_sizes_rule(partner_sizes_count, total_product_sizes):
+                                # Count how many sizes sender can transfer
+                                # (sizes where sender has excess AND partner has 0)
+                                transferable_sizes = 0
+                                for row_info in product_rows:
+                                    sender_qty_row = row_info["store_quantities"].get(sender_store, 0)
+                                    partner_qty_row = row_info["store_quantities"].get(partner_store, 0)
+                                    if sender_qty_row > self.config.balance_threshold and partner_qty_row == 0:
+                                        transferable_sizes += 1
+
+                                # Can only transfer if 3+ sizes available
+                                partner_transfer_decisions[decision_key] = (
+                                    transferable_sizes >= MIN_SIZES_TO_ADD
+                                )
+                            else:
+                                # Min sizes rule doesn't apply, allow normal transfer
+                                partner_transfer_decisions[decision_key] = True
+
+                        can_transfer = partner_transfer_decisions[decision_key]
+
+                        if can_transfer:
+                            # Check if partner needs this specific variant
+                            variant_str = str(variant) if pd.notna(variant) else ""
+                            partner_qty = working_inventory.get(
+                                (product_name, variant_str, partner_store), 0
+                            )
+
+                            if partner_qty == 0 and remaining_excess > 0:
+                                preview.transfers.append(Transfer(
+                                    sender=sender_code,
+                                    receiver=partner_store,
+                                    quantity=1
+                                ))
+                                working_inventory[(product_name, variant_str, partner_store)] = 1
+                                remaining_excess -= 1
 
                 # All remaining excess goes to Stock (paired or not)
                 if remaining_excess > 0:

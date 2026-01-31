@@ -33,13 +33,19 @@ tests/                    # Pytest Tests
 **Balancing Logic:**
 - Excess (> threshold) goes directly to Stock
 - Exception: Store pairs (125004↔125005, 125008↔129877) can balance between each other first
-- If partner has 0 inventory: 1 item to partner, rest to Stock
-- If partner has inventory: all to Stock
+- Minimum sizes rule applies to paired transfers:
+  - If partner has 0-1 sizes AND product has 4+ sizes → need 3+ transferable sizes
+  - If sender can provide 3+ sizes: all transfer to partner
+  - If sender can provide <3 sizes: all to Stock instead
+- If partner has 2+ sizes: normal rule (1 item per variant where partner has 0)
 
 ### `core/config.py`
 - `DEFAULT_STORE_PRIORITY` - Default store order
 - `DEFAULT_EXCLUDED_STORES` - Default excluded stores
 - `STORE_BALANCE_PAIRS` - Store pairs that can balance between each other
+- `MIN_SIZES_THRESHOLD` - Store must have fewer than this many sizes for min rule (default: 2)
+- `MIN_SIZES_TO_ADD` - Minimum sizes required for transfer (default: 3)
+- `MIN_PRODUCT_SIZES_FOR_RULE` - Product must have at least this many sizes (default: 4)
 
 ### `core/file_loader.py`
 - `find_header_row(file)` - Auto-detects header row
@@ -51,6 +57,11 @@ tests/                    # Pytest Tests
 
 ### `core/models.py`
 Dataclasses: `Transfer`, `TransferPreview`, `TransferResult`, `DistributionConfig`, `UpdatedInventoryResult`
+
+**Shared Utility Functions:**
+- `get_stock_value(val)` - Convert cell value to int (used by both distributor and balancer)
+- `count_sizes_with_stock(rows, store)` - Count sizes a store has for a product
+- `should_apply_min_sizes_rule(store_sizes, total_sizes)` - Check if min sizes rule applies
 
 **DistributionConfig** fields:
 - `store_priority` - Store priority order
