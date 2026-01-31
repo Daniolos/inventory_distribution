@@ -568,3 +568,121 @@ class TestMinimumSizesRuleInBalancing:
 
         # Partner receives 3 sizes (M, L, XL - those where partner has 0)
         assert len(transfers_to_partner) == 3
+
+
+class TestBalancerIndicatorFlags:
+    """Tests for indicator flags (skip_reason, min_sizes_skipped, etc.)."""
+
+    def test_min_sizes_skipped_flag_set_when_partner_blocked(self, config_with_pairs):
+        """When partner is blocked due to min sizes rule, flag should be set.
+
+        Product has 4 sizes, sender has only 2 with excess -> partner blocked.
+        """
+        rows = [
+            create_test_row("Product X", "Size S", store_quantities={
+                "125004 EKT-PC-Гринвич": 5, "125005 EKT-PC-Мега": 0
+            }),
+            create_test_row("Product X", "Size M", store_quantities={
+                "125004 EKT-PC-Гринвич": 4, "125005 EKT-PC-Мега": 0
+            }),
+            create_test_row("Product X", "Size L", store_quantities={
+                "125004 EKT-PC-Гринвич": 2, "125005 EKT-PC-Мега": 0  # No excess
+            }),
+            create_test_row("Product X", "Size XL", store_quantities={
+                "125004 EKT-PC-Гринвич": 1, "125005 EKT-PC-Мега": 0  # No excess
+            }),
+        ]
+        df = create_test_df(rows)
+
+        balancer = InventoryBalancer(config_with_pairs)
+        previews = balancer.preview(df, header_row=7)
+
+        # Check that min_sizes_skipped is True for rows with excess
+        for preview in previews:
+            if preview.has_transfers:
+                assert preview.min_sizes_skipped is True
+                assert preview.skip_reason is not None
+                assert "125005" in preview.skip_reason
+
+    def test_uses_standard_distribution_flag_for_small_products(self, config_with_pairs):
+        """Products with <4 sizes should have uses_standard_distribution flag."""
+        rows = [
+            create_test_row("Product Y", "Size S", store_quantities={
+                "125004 EKT-PC-Гринвич": 5, "125005 EKT-PC-Мега": 0
+            }),
+            create_test_row("Product Y", "Size M", store_quantities={
+                "125004 EKT-PC-Гринвич": 4, "125005 EKT-PC-Мега": 0
+            }),
+            create_test_row("Product Y", "Size L", store_quantities={
+                "125004 EKT-PC-Гринвич": 5, "125005 EKT-PC-Мега": 0
+            }),
+        ]
+        df = create_test_df(rows)
+
+        balancer = InventoryBalancer(config_with_pairs)
+        previews = balancer.preview(df, header_row=7)
+
+        # All rows should have uses_standard_distribution = True
+        for preview in previews:
+            assert preview.uses_standard_distribution is True
+
+    def test_skipped_stores_contains_partner_when_blocked(self, config_with_pairs):
+        """When partner is blocked, skipped_stores should contain the partner."""
+        rows = [
+            create_test_row("Product Z", "Size S", store_quantities={
+                "125004 EKT-PC-Гринвич": 5, "125005 EKT-PC-Мега": 0
+            }),
+            create_test_row("Product Z", "Size M", store_quantities={
+                "125004 EKT-PC-Гринвич": 4, "125005 EKT-PC-Мега": 0
+            }),
+            create_test_row("Product Z", "Size L", store_quantities={
+                "125004 EKT-PC-Гринвич": 2, "125005 EKT-PC-Мега": 0
+            }),
+            create_test_row("Product Z", "Size XL", store_quantities={
+                "125004 EKT-PC-Гринвич": 1, "125005 EKT-PC-Мега": 0
+            }),
+        ]
+        df = create_test_df(rows)
+
+        balancer = InventoryBalancer(config_with_pairs)
+        previews = balancer.preview(df, header_row=7)
+
+        # Check skipped_stores on rows with transfers
+        for preview in previews:
+            if preview.has_transfers:
+                assert len(preview.skipped_stores) > 0
+                partner_skipped = any(
+                    "125005" in s.store_name for s in preview.skipped_stores
+                )
+                assert partner_skipped
+                # Reason should be min_sizes
+                assert preview.skipped_stores[0].reason == "min_sizes"
+
+    def test_no_flags_when_transfer_succeeds(self, config_with_pairs):
+        """When transfer to partner succeeds, no skip flags should be set."""
+        rows = [
+            create_test_row("Product W", "Size S", store_quantities={
+                "125004 EKT-PC-Гринвич": 5, "125005 EKT-PC-Мега": 0
+            }),
+            create_test_row("Product W", "Size M", store_quantities={
+                "125004 EKT-PC-Гринвич": 4, "125005 EKT-PC-Мега": 0
+            }),
+            create_test_row("Product W", "Size L", store_quantities={
+                "125004 EKT-PC-Гринвич": 5, "125005 EKT-PC-Мега": 0
+            }),
+            create_test_row("Product W", "Size XL", store_quantities={
+                "125004 EKT-PC-Гринвич": 4, "125005 EKT-PC-Мега": 0
+            }),
+        ]
+        df = create_test_df(rows)
+
+        balancer = InventoryBalancer(config_with_pairs)
+        previews = balancer.preview(df, header_row=7)
+
+        # All 4 sizes should transfer to partner - no skip flags
+        for preview in previews:
+            assert preview.min_sizes_skipped is False
+            assert preview.skip_reason is None
+            assert len(preview.skipped_stores) == 0
+            # Product has 4 sizes, so uses_standard_distribution should be False
+            assert preview.uses_standard_distribution is False

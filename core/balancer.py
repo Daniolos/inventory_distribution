@@ -11,13 +11,14 @@ from .models import (
     TransferResult,
     DistributionConfig,
     SalesPriorityData,
+    SkippedStore,
     build_store_id_map,
     get_stock_value,
     count_sizes_with_stock,
     should_apply_min_sizes_rule,
 )
 from .sales_parser import extract_product_code_from_input
-from .config import MIN_SIZES_TO_ADD
+from .config import MIN_SIZES_TO_ADD, MIN_PRODUCT_SIZES_FOR_RULE
 
 
 class InventoryBalancer:
@@ -188,6 +189,19 @@ class InventoryBalancer:
                 for store, qty in row_data["store_quantities"].items():
                     working_inventory[(product_name, variant, store)] = qty
 
+        # Track products with <4 sizes (standard distribution, no min sizes rule)
+        products_under_4_sizes: set[str] = set()
+        for product_name, data in product_data.items():
+            if data["total_sizes"] < MIN_PRODUCT_SIZES_FOR_RULE:
+                products_under_4_sizes.add(product_name)
+
+        # Track rows where partner was skipped due to min sizes rule
+        # Key: original_idx, Value: (partner_store, transferable_sizes)
+        min_sizes_skipped_info: dict[int, tuple[str, int]] = {}
+
+        # Track skipped stores per row
+        skipped_stores_per_row: dict[int, list[SkippedStore]] = defaultdict(list)
+
         previews = []
 
         for idx, (original_idx, row) in enumerate(df_filtered.iterrows()):
@@ -267,9 +281,24 @@ class InventoryBalancer:
                                         transferable_sizes += 1
 
                                 # Can only transfer if 3+ sizes available
-                                partner_transfer_decisions[decision_key] = (
-                                    transferable_sizes >= MIN_SIZES_TO_ADD
-                                )
+                                can_transfer_decision = transferable_sizes >= MIN_SIZES_TO_ADD
+                                partner_transfer_decisions[decision_key] = can_transfer_decision
+
+                                # Track if min sizes rule blocked the transfer
+                                if not can_transfer_decision:
+                                    # Mark all rows of this product as skipped due to min sizes
+                                    for row_info in product_rows:
+                                        row_orig_idx = row_info["original_idx"]
+                                        min_sizes_skipped_info[row_orig_idx] = (
+                                            partner_store, transferable_sizes
+                                        )
+                                        skipped_stores_per_row[row_orig_idx].append(
+                                            SkippedStore(
+                                                store_name=partner_store,
+                                                reason="min_sizes",
+                                                existing_qty=0
+                                            )
+                                        )
                             else:
                                 # Min sizes rule doesn't apply, allow normal transfer
                                 partner_transfer_decisions[decision_key] = True
@@ -299,6 +328,24 @@ class InventoryBalancer:
                         receiver="Сток",
                         quantity=remaining_excess
                     ))
+
+            # Set indicator flags on preview
+            # 1. Standard distribution (product has <4 sizes, min sizes rule doesn't apply)
+            if product_name in products_under_4_sizes:
+                preview.uses_standard_distribution = True
+
+            # 2. Min sizes skipped (partner was skipped due to min sizes rule)
+            if original_idx in min_sizes_skipped_info:
+                preview.min_sizes_skipped = True
+                partner_store, transferable = min_sizes_skipped_info[original_idx]
+                preview.skip_reason = (
+                    f"Недостаточно размеров для партнёра {partner_store.split()[0]} "
+                    f"(есть {transferable}, нужно ≥{MIN_SIZES_TO_ADD})"
+                )
+
+            # 3. Add skipped stores to preview
+            if original_idx in skipped_stores_per_row:
+                preview.skipped_stores = skipped_stores_per_row[original_idx]
 
             previews.append(preview)
 
