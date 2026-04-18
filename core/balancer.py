@@ -76,7 +76,9 @@ class InventoryBalancer:
 
             product_name = str(product)
             variant = row.get(self.config.variant_column, "")
-            variant_str = str(variant) if pd.notna(variant) else ""
+            variant_str = str(variant).strip() if pd.notna(variant) else ""
+            if variant_str == "":
+                continue
 
             # Build store quantities for this row
             store_quantities = {}
@@ -218,6 +220,10 @@ class InventoryBalancer:
             product = row[self.config.product_name_column]
             variant = row.get(self.config.variant_column, "")
             product_name = str(product) if pd.notna(product) else ""
+
+            variant_str_check = str(variant).strip() if pd.notna(variant) else ""
+            if variant_str_check == "":
+                continue
 
             excel_row = header_row + 3 + original_idx
 

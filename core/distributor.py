@@ -113,7 +113,11 @@ class StockDistributor:
         available_stores: list[str],
         header_row: int = 0
     ) -> dict:
-        """Group rows by product. Each product has a list of size-rows with stock data."""
+        """Group rows by product. Each product has a list of size-rows with stock data.
+
+        Rows with an empty Характеристика are treated as product-level summary/total
+        rows and skipped — distributing from them would double-count stock.
+        """
         product_data: dict = defaultdict(lambda: {"rows": []})
 
         for original_idx, row in df.iterrows():
@@ -121,9 +125,12 @@ class StockDistributor:
             if pd.isna(product) or product == "":
                 continue
 
-            product = str(product)
             variant_raw = row.get(self.config.variant_column, "")
-            variant = str(variant_raw) if pd.notna(variant_raw) else ""
+            variant = str(variant_raw).strip() if pd.notna(variant_raw) else ""
+            if variant == "":
+                continue
+
+            product = str(product)
             source_qty = get_stock_value(row.get(source_column, 0))
 
             store_quantities = {s: get_stock_value(row.get(s, 0)) for s in available_stores}
