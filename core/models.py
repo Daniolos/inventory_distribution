@@ -76,30 +76,6 @@ def count_sizes_with_stock(product_rows: list[dict], store: str) -> int:
     return len(sizes_with_stock)
 
 
-def should_apply_min_sizes_rule(
-    store_sizes_count: int,
-    total_product_sizes: int,
-    min_sizes_threshold: int = 2,
-    min_product_sizes_for_rule: int = 4
-) -> bool:
-    """
-    Determine if minimum sizes rule should apply.
-
-    Rule applies when:
-    1. Store has < threshold sizes of this product (default: 0-1 sizes)
-    2. Product has enough sizes total (default: 4+ sizes)
-
-    Args:
-        store_sizes_count: Number of sizes store currently has
-        total_product_sizes: Total number of sizes this product has
-        min_sizes_threshold: Store must have fewer than this many sizes (default 2)
-        min_product_sizes_for_rule: Minimum product sizes needed (default 4)
-
-    Returns:
-        True if minimum sizes rule should be applied
-    """
-    return (store_sizes_count < min_sizes_threshold and
-            total_product_sizes >= min_product_sizes_for_rule)
 
 
 @dataclass
@@ -203,7 +179,7 @@ class Transfer:
 class SkippedStore:
     """Represents a store that was skipped during distribution."""
     store_name: str      # Full store name (e.g., "125007 MSK-PC-Гагаринский")
-    reason: str          # "has_stock" or "min_sizes"
+    reason: str          # "has_stock", "target_not_reached", "excluded", "filtered_out"
     existing_qty: int = 0  # Number of existing pieces (for has_stock reason)
 
 
@@ -214,15 +190,15 @@ class TransferPreview:
     product_name: str
     variant: str
     transfers: list[Transfer] = field(default_factory=list)
-    
+
     # Skipped stores tracking
     skipped_stores: list[SkippedStore] = field(default_factory=list)
-    
+
     # Per-row status indicators
-    skip_reason: Optional[str] = None  # e.g., "min_sizes_not_met"
-    uses_standard_distribution: bool = False  # Product has <4 sizes
-    uses_fallback_priority: bool = False  # Product not found in sales data
-    min_sizes_skipped: bool = False  # Store was skipped due to min-sizes rule
+    skip_reason: Optional[str] = None
+    uses_fallback_priority: bool = False      # Product not found in sales data
+    target_not_reached: bool = False          # At least one store was skipped because target could not be reached
+    uses_standard_distribution: bool = False  # Balancer: product has <4 sizes so min-sizes rule does not apply
 
     @property
     def total_quantity(self) -> int:
@@ -233,16 +209,11 @@ class TransferPreview:
     def has_transfers(self) -> bool:
         """Whether this row has any transfers."""
         return len(self.transfers) > 0
-    
+
     @property
     def has_warning(self) -> bool:
         """Whether this row has a warning status."""
         return self.skip_reason is not None
-    
-    @property
-    def has_info(self) -> bool:
-        """Whether this row has an info status."""
-        return self.uses_standard_distribution
 
     @property
     def has_fallback_priority(self) -> bool:
@@ -287,8 +258,10 @@ class DistributionConfig:
     store_balance_pairs: list[tuple[str, str]] = field(default_factory=list)
 
     # Script 1 (Stock → Stores) options
-    complete_distribution: bool = False
-    min_sizes_to_add: int = 3
+    target_sizes_filled: int = 3       # Store must end up with at least this many sizes filled
+    units_per_size: int = 1            # Target units per filled size (1-3)
+    min_product_sizes: int = 1         # Range filter: only products with total sizes ≥ this
+    max_product_sizes: int = 99        # Range filter: only products with total sizes ≤ this
 
     # Column names
     stock_column: str = "Сток"
@@ -325,8 +298,10 @@ class DistributionConfig:
             "excluded_stores": self.excluded_stores,
             "balance_threshold": self.balance_threshold,
             "store_balance_pairs": [list(pair) for pair in self.store_balance_pairs],
-            "complete_distribution": self.complete_distribution,
-            "min_sizes_to_add": self.min_sizes_to_add,
+            "target_sizes_filled": self.target_sizes_filled,
+            "units_per_size": self.units_per_size,
+            "min_product_sizes": self.min_product_sizes,
+            "max_product_sizes": self.max_product_sizes,
         }
 
     @classmethod
@@ -338,6 +313,8 @@ class DistributionConfig:
             excluded_stores=data.get("excluded_stores", []),
             balance_threshold=data.get("balance_threshold", 2),
             store_balance_pairs=[tuple(pair) for pair in pairs],
-            complete_distribution=data.get("complete_distribution", False),
-            min_sizes_to_add=data.get("min_sizes_to_add", 3),
+            target_sizes_filled=data.get("target_sizes_filled", 3),
+            units_per_size=data.get("units_per_size", 1),
+            min_product_sizes=data.get("min_product_sizes", 1),
+            max_product_sizes=data.get("max_product_sizes", 99),
         )

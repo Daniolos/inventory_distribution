@@ -25,19 +25,15 @@ STORE_BALANCE_PAIRS: list[tuple[str, str]] = [
     ("125008", "129877"),  # MSK-PC-РИО Ленинский <-> MSK-PC-Мега 1 Теплый Стан
 ]
 
-# Default balance threshold
+# Default balance threshold (used by InventoryBalancer)
 DEFAULT_BALANCE_THRESHOLD = 2
 
-# Minimum sizes rule configuration (shared between distributor and balancer)
-# Rule: If store has 0-1 sizes of a product with 4+ total sizes,
-# only transfer if 3+ sizes are available (all-or-nothing)
-MIN_SIZES_THRESHOLD = 2  # If store has < this many sizes, apply min sizes rule
-MIN_SIZES_TO_ADD = 3     # Minimum number of different sizes required for transfer
-MIN_PRODUCT_SIZES_FOR_RULE = 4  # Product must have at least this many sizes
-
-# Outlet store (receives extra items in complete distribution mode, Phase C)
-OUTLET_STORE_ID = 125839  # MSK-PC-Outlet Белая Дача
-OUTLET_MAX_PER_SIZE = 3
+# Stock distribution defaults
+DEFAULT_TARGET_SIZES_FILLED = 3  # Store must end up with at least this many sizes filled
+DEFAULT_UNITS_PER_SIZE = 1       # Units per filled size after distribution
+MAX_UNITS_PER_SIZE = 3           # UI cap for units_per_size
+DEFAULT_MIN_PRODUCT_SIZES = 1    # Product size-count range filter: lower bound
+DEFAULT_MAX_PRODUCT_SIZES = 99   # Product size-count range filter: upper bound
 
 # Column names (these are fixed based on input format)
 STOCK_COLUMN = "Сток"

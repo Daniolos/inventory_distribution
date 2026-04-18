@@ -9,6 +9,10 @@ from core.config import (
     DEFAULT_STORE_PRIORITY,
     DEFAULT_EXCLUDED_STORES,
     DEFAULT_BALANCE_THRESHOLD,
+    DEFAULT_TARGET_SIZES_FILLED,
+    DEFAULT_UNITS_PER_SIZE,
+    DEFAULT_MIN_PRODUCT_SIZES,
+    DEFAULT_MAX_PRODUCT_SIZES,
 )
 
 
@@ -21,10 +25,14 @@ def init_session_state():
         st.session_state.excluded_stores = DEFAULT_EXCLUDED_STORES.copy()
     if "balance_threshold" not in st.session_state:
         st.session_state.balance_threshold = DEFAULT_BALANCE_THRESHOLD
-    if "complete_distribution" not in st.session_state:
-        st.session_state.complete_distribution = False
-    if "min_sizes_to_add" not in st.session_state:
-        st.session_state.min_sizes_to_add = 3
+    if "target_sizes_filled" not in st.session_state:
+        st.session_state.target_sizes_filled = DEFAULT_TARGET_SIZES_FILLED
+    if "units_per_size" not in st.session_state:
+        st.session_state.units_per_size = DEFAULT_UNITS_PER_SIZE
+    if "min_product_sizes" not in st.session_state:
+        st.session_state.min_product_sizes = DEFAULT_MIN_PRODUCT_SIZES
+    if "max_product_sizes" not in st.session_state:
+        st.session_state.max_product_sizes = DEFAULT_MAX_PRODUCT_SIZES
     
     # Preview/Results for Script 1 (Stock → Stores)
     if "preview_results_script1" not in st.session_state:

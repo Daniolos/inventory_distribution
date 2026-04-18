@@ -597,10 +597,10 @@ class TestBalancerIndicatorFlags:
         balancer = InventoryBalancer(config_with_pairs)
         previews = balancer.preview(df, header_row=7)
 
-        # Check that min_sizes_skipped is True for rows with excess
+        # Check that target_not_reached is True for rows with excess
         for preview in previews:
             if preview.has_transfers:
-                assert preview.min_sizes_skipped is True
+                assert preview.target_not_reached is True
                 assert preview.skip_reason is not None
                 assert "125005" in preview.skip_reason
 
@@ -681,7 +681,7 @@ class TestBalancerIndicatorFlags:
 
         # All 4 sizes should transfer to partner - no skip flags
         for preview in previews:
-            assert preview.min_sizes_skipped is False
+            assert preview.target_not_reached is False
             assert preview.skip_reason is None
             assert len(preview.skipped_stores) == 0
             # Product has 4 sizes, so uses_standard_distribution should be False

@@ -15,10 +15,20 @@ from .models import (
     build_store_id_map,
     get_stock_value,
     count_sizes_with_stock,
-    should_apply_min_sizes_rule,
 )
 from .sales_parser import extract_product_code_from_input
-from .config import MIN_SIZES_TO_ADD, MIN_PRODUCT_SIZES_FOR_RULE
+
+
+# Balancer-local constants for the partner paired-store min-sizes rule.
+# The Balancer rule is independent of the Distributor's target-sizes logic.
+_BALANCER_MIN_SIZES_THRESHOLD = 2   # Partner must have fewer than this many sizes
+_BALANCER_MIN_SIZES_TO_ADD = 3      # Minimum transferable sizes required
+_BALANCER_MIN_PRODUCT_SIZES = 4     # Product must have at least this many sizes
+
+
+def _should_apply_balancer_min_sizes_rule(partner_sizes_count: int, total_product_sizes: int) -> bool:
+    return (partner_sizes_count < _BALANCER_MIN_SIZES_THRESHOLD and
+            total_product_sizes >= _BALANCER_MIN_PRODUCT_SIZES)
 
 
 class InventoryBalancer:
@@ -192,7 +202,7 @@ class InventoryBalancer:
         # Track products with <4 sizes (standard distribution, no min sizes rule)
         products_under_4_sizes: set[str] = set()
         for product_name, data in product_data.items():
-            if data["total_sizes"] < MIN_PRODUCT_SIZES_FOR_RULE:
+            if data["total_sizes"] < _BALANCER_MIN_PRODUCT_SIZES:
                 products_under_4_sizes.add(product_name)
 
         # Track rows where partner was skipped due to min sizes rule
@@ -270,7 +280,7 @@ class InventoryBalancer:
                             # Evaluate minimum sizes rule for this product/partner
                             partner_sizes_count = count_sizes_with_stock(product_rows, partner_store)
 
-                            if should_apply_min_sizes_rule(partner_sizes_count, total_product_sizes):
+                            if _should_apply_balancer_min_sizes_rule(partner_sizes_count, total_product_sizes):
                                 # Count how many sizes sender can transfer
                                 # (sizes where sender has excess AND partner has 0)
                                 transferable_sizes = 0
@@ -281,7 +291,7 @@ class InventoryBalancer:
                                         transferable_sizes += 1
 
                                 # Can only transfer if 3+ sizes available
-                                can_transfer_decision = transferable_sizes >= MIN_SIZES_TO_ADD
+                                can_transfer_decision = transferable_sizes >= _BALANCER_MIN_SIZES_TO_ADD
                                 partner_transfer_decisions[decision_key] = can_transfer_decision
 
                                 # Track if min sizes rule blocked the transfer
@@ -334,13 +344,13 @@ class InventoryBalancer:
             if product_name in products_under_4_sizes:
                 preview.uses_standard_distribution = True
 
-            # 2. Min sizes skipped (partner was skipped due to min sizes rule)
+            # 2. Target not reached (partner was skipped due to min sizes rule)
             if original_idx in min_sizes_skipped_info:
-                preview.min_sizes_skipped = True
+                preview.target_not_reached = True
                 partner_store, transferable = min_sizes_skipped_info[original_idx]
                 preview.skip_reason = (
                     f"Недостаточно размеров для партнёра {partner_store.split()[0]} "
-                    f"(есть {transferable}, нужно ≥{MIN_SIZES_TO_ADD})"
+                    f"(есть {transferable}, нужно ≥{_BALANCER_MIN_SIZES_TO_ADD})"
                 )
 
             # 3. Add skipped stores to preview

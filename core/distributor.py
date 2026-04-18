@@ -1,4 +1,27 @@
-"""Stock distribution logic - distributes from Stock/Photo Stock to stores."""
+"""Stock distribution logic - distributes from Stock/Photo Stock to stores.
+
+Algorithm overview
+------------------
+Each run distributes inventory from a single source (Сток or Фото склад) to stores.
+
+A product participates in the run only if its total number of sizes falls within the
+configured range ``[min_product_sizes, max_product_sizes]``.
+
+For every participating product, distribution happens in up to three phases. Phases
+iterate stores in priority order, and each phase is completed for every store before
+the next phase begins (fair distribution).
+
+    Phase 1 — Reach the size-count target
+        For each store: if current_filled_sizes + transferable_sizes >= target_sizes_filled,
+        transfer 1 unit for each transferable size. Otherwise skip the store entirely
+        (all-or-nothing, reason=target_not_reached).
+
+    Phase 2 — Top up to 2 units per filled size (only if units_per_size >= 2)
+        For each store: for every size currently at 1 unit, transfer +1 if stock left.
+
+    Phase 3 — Top up to 3 units per filled size (only if units_per_size >= 3)
+        For each store: for every size currently at 2 units, transfer +1 if stock left.
+"""
 
 import pandas as pd
 from datetime import datetime
@@ -14,30 +37,14 @@ from .models import (
     SkippedStore,
     UpdatedInventoryResult,
     build_store_id_map,
-    extract_store_id,
     get_stock_value,
-    count_sizes_with_stock,
-    should_apply_min_sizes_rule,
 )
 from .sales_parser import extract_product_code_from_input
-from .config import (
-    OUTPUT_COLUMNS,
-    MIN_SIZES_THRESHOLD,
-    MIN_SIZES_TO_ADD,
-    MIN_PRODUCT_SIZES_FOR_RULE,
-    OUTLET_STORE_ID,
-    OUTLET_MAX_PER_SIZE,
-)
+from .config import OUTPUT_COLUMNS
 
 
 class StockDistributor:
-    """
-    Distributes inventory from Stock (Сток) or Photo Stock (Фото склад) to stores.
-
-    Distribution rules:
-    - If store has 0-1 sizes of a product: add ALL available sizes (only if 3+ sizes available in stock)
-    - If store has 2+ sizes of a product: normal distribution (1 item per variant with 0 stock)
-    """
+    """Distributes inventory from Сток/Фото склад to stores using a phased algorithm."""
 
     def __init__(
         self,
@@ -46,7 +53,6 @@ class StockDistributor:
     ):
         self.config = config
         self.sales_data = sales_data
-        # Build store ID to name mapping for matching sales data
         self._store_id_map = build_store_id_map(config.store_priority)
 
     def _get_product_priority(
@@ -57,31 +63,19 @@ class StockDistributor:
         """
         Get store priority for a specific product.
 
-        Args:
-            product_name: Product name from Номенклатура column
-            available_stores: List of stores that exist in the DataFrame
-
         Returns:
-            Tuple of (active_store_list_in_priority_order, uses_fallback, full_priority_with_excluded)
-            - active_store_list: Only non-excluded stores
-            - uses_fallback: True if product not found in sales data
-            - full_priority_with_excluded: Full ordered list including excluded stores
+            (active_priority, uses_fallback, full_priority_with_excluded)
         """
-        # Build full priority list (including excluded stores)
         full_priority = [s for s in self.config.store_priority if s in available_stores]
-        
-        # Default: use static priority (filtered to active stores only)
         fallback_priority = [s for s in self.config.active_stores if s in available_stores]
 
         if not self.sales_data:
             return fallback_priority, False, full_priority
 
-        # Extract product code from input file format
         product_code = extract_product_code_from_input(product_name)
         if not product_code:
             return fallback_priority, True, full_priority
 
-        # Look up in sales data
         priority, found = self.sales_data.get_product_priority(
             product_code,
             self.config.store_priority,
@@ -91,18 +85,13 @@ class StockDistributor:
         if not found:
             return fallback_priority, True, full_priority
 
-        # Filter to available stores only and maintain sales-based order
         active_priority = [s for s in priority if s in available_stores and s in self.config.active_stores]
-        
-        # Build full priority with excluded (same order as sales-based, but include excluded)
         full_priority_sales = [s for s in priority if s in available_stores]
 
-        # Add any stores that weren't in sales data but are in available/active
         for store in fallback_priority:
             if store not in active_priority:
                 active_priority.append(store)
-        
-        # Add stores not in sales data to full priority too
+
         for store in full_priority:
             if store not in full_priority_sales:
                 full_priority_sales.append(store)
@@ -110,122 +99,79 @@ class StockDistributor:
         return active_priority, False, full_priority_sales
 
     def _get_source_column(self, source: str) -> str:
-        """Get the column name for the source."""
         if source == "photo":
             return self.config.photo_stock_column
         return self.config.stock_column
 
     def _get_source_name(self, source: str) -> str:
-        """Get display name for the source."""
         return "Фото" if source == "photo" else "Сток"
 
     def _analyze_product_inventory(
         self,
         df: pd.DataFrame,
         source_column: str,
-        active_stores: list[str],
+        available_stores: list[str],
         header_row: int = 0
     ) -> dict:
-        """
-        Analyze inventory by product to understand size distribution.
+        """Group rows by product. Each product has a list of size-rows with stock data."""
+        product_data: dict = defaultdict(lambda: {"rows": []})
 
-        Args:
-            header_row: 0-indexed header row in Excel (used to calculate Excel row numbers)
-
-        Returns:
-            Dict with product name as key, containing:
-            - rows: list of (row_idx, variant, source_qty, store_quantities)
-            - sizes_in_stock: list of variants with source_qty > 0
-        """
-        product_data = defaultdict(lambda: {"rows": [], "sizes_in_stock": []})
-
-        for idx, (original_idx, row) in enumerate(df.iterrows()):
+        for original_idx, row in df.iterrows():
             product = row[self.config.product_name_column]
             if pd.isna(product) or product == "":
                 continue
 
             product = str(product)
-            variant = str(row.get(self.config.variant_column, "")) if pd.notna(row.get(self.config.variant_column)) else ""
+            variant_raw = row.get(self.config.variant_column, "")
+            variant = str(variant_raw) if pd.notna(variant_raw) else ""
             source_qty = get_stock_value(row.get(source_column, 0))
 
-            # Get store quantities for this row
-            store_quantities = {}
-            for store in active_stores:
-                store_quantities[store] = get_stock_value(row.get(store, 0))
-
-            # Calculate Excel row: header_row (0-based) + 3 + original_idx
-            # Breakdown: +1 for 1-based Excel, +1 for header row, +1 for skipped sub-header row
-            # Using original_idx (pandas index) instead of idx to preserve correct row number after filtering
+            store_quantities = {s: get_stock_value(row.get(s, 0)) for s in available_stores}
             excel_row = header_row + 3 + original_idx
 
             product_data[product]["rows"].append({
-                "row_idx": excel_row,  # Excel row number for display
+                "row_idx": excel_row,
                 "variant": variant,
                 "source_qty": source_qty,
                 "store_quantities": store_quantities,
                 "original_idx": original_idx,
             })
 
-            if source_qty > 0:
-                product_data[product]["sizes_in_stock"].append(variant)
-
         return product_data
 
     def preview(self, df: pd.DataFrame, source: str = "stock", header_row: int = 0) -> list[TransferPreview]:
-        """
-        Generate preview of distributions without executing.
-
-        Args:
-            df: Input DataFrame (already loaded with correct header row)
-            source: "stock" for Сток, "photo" for Фото склад
-            header_row: 0-indexed header row in Excel (for displaying correct Excel row numbers)
-
-        Returns:
-            List of TransferPreview objects showing planned distributions
-        """
+        """Generate preview of planned transfers without executing."""
         source_column = self._get_source_column(source)
         source_name = self._get_source_name(source)
 
-        # Filter valid rows
         df_filtered = df[df[self.config.product_name_column].notna()].copy()
         df_filtered = df_filtered[df_filtered[self.config.product_name_column] != ""]
 
-        # Get all stores that exist in the DataFrame (for analysis)
-        available_stores = [
-            s for s in self.config.store_priority
-            if s in df_filtered.columns
-        ]
-
-        # Analyze inventory by product (using all available stores for quantity tracking)
+        available_stores = [s for s in self.config.store_priority if s in df_filtered.columns]
         product_data = self._analyze_product_inventory(df_filtered, source_column, available_stores, header_row)
 
-        # Track remaining stock per row (to avoid double-allocation)
-        remaining_stock = {}
-        # Track current store quantity per (row, store) — starts from input, increments on transfer
+        # Working state: per-row remaining stock and live store quantities
+        remaining_stock: dict[int, int] = {}
         current_store_qty: dict[int, dict[str, int]] = {}
-        for product, data in product_data.items():
+        for data in product_data.values():
             for row_data in data["rows"]:
                 idx = row_data["original_idx"]
                 remaining_stock[idx] = row_data["source_qty"]
                 current_store_qty[idx] = dict(row_data["store_quantities"])
 
-        # Create previews for all rows
-        previews_dict = {}
-
-        # Track which products have <4 sizes for per-row status
-        products_under_4_sizes = set()
-        # Track rows skipped due to min-sizes rule: {original_idx: skip_reason}
-        skipped_rows_reasons = {}
-        # Track products using fallback priority (not found in sales data)
-        products_using_fallback = set()
-        # Track skipped stores per row: {original_idx: [SkippedStore, ...]}
+        previews_dict: dict[int, TransferPreview] = {}
+        products_using_fallback: set[str] = set()
+        products_filtered_out: set[str] = set()
         skipped_stores_per_row: dict[int, list[SkippedStore]] = defaultdict(list)
-        # Track rows with min_sizes_skipped flag
-        min_sizes_skipped_rows = set()
+        target_not_reached_rows: set[int] = set()
 
-        min_sizes_to_add = self.config.min_sizes_to_add
+        excluded_stores = set(self.config.excluded_stores)
+        target = self.config.target_sizes_filled
+        units = self.config.units_per_size
+        size_min = self.config.min_product_sizes
+        size_max = self.config.max_product_sizes
 
-        def _get_or_create_preview(row_data: dict, product_name: str) -> TransferPreview:
+        def get_or_create_preview(row_data: dict, product_name: str) -> TransferPreview:
             idx = row_data["original_idx"]
             if idx not in previews_dict:
                 previews_dict[idx] = TransferPreview(
@@ -235,245 +181,143 @@ class StockDistributor:
                 )
             return previews_dict[idx]
 
-        # Cache full_priority and excluded_stores per product for use in Phase B/C
-        product_priority_cache: dict[str, list[str]] = {}
+        def count_filled_sizes(product_rows: list[dict], store: str) -> int:
+            return sum(1 for r in product_rows if current_store_qty[r["original_idx"]].get(store, 0) > 0)
 
-        # ===== Phase A: Standard distribution =====
         for product, data in product_data.items():
-            sizes_in_stock = data["sizes_in_stock"]
-            available_sizes_count = len(sizes_in_stock)
-            total_product_sizes = len(data["rows"])  # All sizes of this product
+            rows = data["rows"]
+            total_sizes = len(rows)
 
-            # Track products with <4 sizes (for per-row status)
-            if total_product_sizes < 4:
-                products_under_4_sizes.add(product)
+            # Range filter on product size count
+            if total_sizes < size_min or total_sizes > size_max:
+                products_filtered_out.add(product)
+                continue
 
-            # Get product-specific store priority (including full list with excluded)
-            product_stores, uses_fallback, full_priority = self._get_product_priority(product, available_stores)
+            active_priority, uses_fallback, full_priority = self._get_product_priority(product, available_stores)
             if uses_fallback and self.sales_data:
                 products_using_fallback.add(product)
 
-            product_priority_cache[product] = full_priority
-
-            # Track excluded stores that appear before active stores in priority
-            excluded_stores = set(self.config.excluded_stores)
-
+            # Track excluded stores (in priority order, for transparency)
             for store in full_priority:
-                # Check if store is excluded - if so, track as skipped and continue
                 if store in excluded_stores:
-                    # Only track excluded stores for rows where they would have been relevant
-                    for row_data in data["rows"]:
-                        if row_data["store_quantities"].get(store, 0) == 0:
-                            skipped_stores_per_row[row_data["original_idx"]].append(
-                                SkippedStore(
-                                    store_name=store,
-                                    reason="excluded",
-                                    existing_qty=0
-                                )
-                            )
+                    for row_data in rows:
+                        idx = row_data["original_idx"]
+                        if current_store_qty[idx].get(store, 0) == 0:
+                            skipped_stores_per_row[idx].append(SkippedStore(
+                                store_name=store, reason="excluded", existing_qty=0
+                            ))
+
+            # ===== Phase 1: Reach size-count target =====
+            for store in active_priority:
+                if store in excluded_stores:
                     continue
 
-                store_sizes_count = count_sizes_with_stock(data["rows"], store)
+                current_filled = count_filled_sizes(rows, store)
+                if current_filled >= target:
+                    continue  # Target already met — Phase 1 does nothing
 
-                # Determine which rule to apply
-                # Minimum sizes rule only applies if:
-                # 1. Store has < MIN_SIZES_THRESHOLD sizes of this product (default: 0-1)
-                # 2. Product has at least MIN_PRODUCT_SIZES_FOR_RULE sizes (default: 4+)
-                if should_apply_min_sizes_rule(store_sizes_count, total_product_sizes):
-                    # Rule: Need N different sizes, "all or nothing"
-                    if available_sizes_count < min_sizes_to_add:
-                        # Not enough sizes in stock, skip this product/store
-                        # Mark rows with skip reason and track as min_sizes skip
-                        for row_data in data["rows"]:
-                            if row_data["store_quantities"].get(store, 0) == 0:
-                                if row_data["original_idx"] not in skipped_rows_reasons:
-                                    skipped_rows_reasons[row_data["original_idx"]] = (
-                                        f"Недостаточно размеров (есть {available_sizes_count}, нужно ≥{min_sizes_to_add})"
-                                    )
-                                # Track this as a min_sizes skip
-                                min_sizes_skipped_rows.add(row_data["original_idx"])
-                                skipped_stores_per_row[row_data["original_idx"]].append(
-                                    SkippedStore(
-                                        store_name=store,
-                                        reason="min_sizes",
-                                        existing_qty=0
-                                    )
-                                )
-                        continue
+                transferable = [
+                    r for r in rows
+                    if current_store_qty[r["original_idx"]].get(store, 0) == 0
+                    and remaining_stock[r["original_idx"]] > 0
+                ]
 
-                    # Find rows with stock that store doesn't have
-                    transferable_rows = []
-                    for row_data in data["rows"]:
-                        if row_data["source_qty"] > 0 and row_data["store_quantities"].get(store, 0) == 0:
-                            if remaining_stock[row_data["original_idx"]] > 0:
-                                transferable_rows.append(row_data)
-
-                    # Need at least N different sizes to transfer
-                    if len(transferable_rows) >= min_sizes_to_add:
-                        # Transfer ALL sizes (minimum N required, checked above)
-                        for row_data in transferable_rows:
-                            idx = row_data["original_idx"]
-                            if remaining_stock[idx] > 0:
-                                preview = _get_or_create_preview(row_data, product)
-                                preview.transfers.append(Transfer(
-                                    sender=source_name,
-                                    receiver=store,
-                                    quantity=1
-                                ))
-                                remaining_stock[idx] -= 1
-                                current_store_qty[idx][store] = current_store_qty[idx].get(store, 0) + 1
-
-                else:
-                    # Rule: Normal distribution - 1 item per variant with 0 stock
-                    for row_data in data["rows"]:
+                if current_filled + len(transferable) < target:
+                    # All-or-nothing: skip store
+                    for row_data in rows:
                         idx = row_data["original_idx"]
-                        store_qty = row_data["store_quantities"].get(store, 0)
-
-                        # Track skipped stores that already have stock
-                        if store_qty > 0:
-                            skipped_stores_per_row[idx].append(
-                                SkippedStore(
-                                    store_name=store,
-                                    reason="has_stock",
-                                    existing_qty=store_qty
-                                )
-                            )
-                            continue
-
-                        if remaining_stock[idx] > 0:
-                            preview = _get_or_create_preview(row_data, product)
-                            preview.transfers.append(Transfer(
-                                sender=source_name,
-                                receiver=store,
-                                quantity=1
+                        if current_store_qty[idx].get(store, 0) == 0:
+                            skipped_stores_per_row[idx].append(SkippedStore(
+                                store_name=store, reason="target_not_reached", existing_qty=0
                             ))
-                            remaining_stock[idx] -= 1
-                            current_store_qty[idx][store] = current_store_qty[idx].get(store, 0) + 1
+                            target_not_reached_rows.add(idx)
+                    continue
 
-        # ===== Phase B and C: Complete distribution (optional) =====
-        if self.config.complete_distribution:
-            excluded_stores = set(self.config.excluded_stores)
+                # Eligible — transfer 1 unit to each transferable size
+                for row_data in transferable:
+                    idx = row_data["original_idx"]
+                    preview = get_or_create_preview(row_data, product)
+                    preview.transfers.append(Transfer(
+                        sender=source_name, receiver=store, quantity=1
+                    ))
+                    remaining_stock[idx] -= 1
+                    current_store_qty[idx][store] = current_store_qty[idx].get(store, 0) + 1
 
-            # Phase B: top up stores that currently have exactly 1 item to 2 items
-            for product, data in product_data.items():
-                full_priority = product_priority_cache.get(product, [])
-                for store in full_priority:
+            # ===== Phase 2: Top up to 2 units per size =====
+            if units >= 2:
+                for store in active_priority:
                     if store in excluded_stores:
                         continue
-                    for row_data in data["rows"]:
+                    for row_data in rows:
                         idx = row_data["original_idx"]
-                        if remaining_stock[idx] <= 0:
-                            continue
-                        if current_store_qty[idx].get(store, 0) == 1:
-                            preview = _get_or_create_preview(row_data, product)
+                        if current_store_qty[idx].get(store, 0) == 1 and remaining_stock[idx] > 0:
+                            preview = get_or_create_preview(row_data, product)
                             preview.transfers.append(Transfer(
-                                sender=source_name,
-                                receiver=store,
-                                quantity=1
+                                sender=source_name, receiver=store, quantity=1
                             ))
                             remaining_stock[idx] -= 1
                             current_store_qty[idx][store] += 1
 
-            # Phase C: fill outlet up to OUTLET_MAX_PER_SIZE per size
-            for product, data in product_data.items():
-                full_priority = product_priority_cache.get(product, [])
-                outlet = next(
-                    (s for s in full_priority
-                     if extract_store_id(s) == OUTLET_STORE_ID
-                     and s not in excluded_stores),
-                    None
-                )
-                if outlet is None:
-                    continue
-                for row_data in data["rows"]:
-                    idx = row_data["original_idx"]
-                    while (current_store_qty[idx].get(outlet, 0) < OUTLET_MAX_PER_SIZE
-                           and remaining_stock[idx] > 0):
-                        preview = _get_or_create_preview(row_data, product)
-                        preview.transfers.append(Transfer(
-                            sender=source_name,
-                            receiver=outlet,
-                            quantity=1
-                        ))
-                        remaining_stock[idx] -= 1
-                        current_store_qty[idx][outlet] = current_store_qty[idx].get(outlet, 0) + 1
+            # ===== Phase 3: Top up to 3 units per size =====
+            if units >= 3:
+                for store in active_priority:
+                    if store in excluded_stores:
+                        continue
+                    for row_data in rows:
+                        idx = row_data["original_idx"]
+                        if current_store_qty[idx].get(store, 0) == 2 and remaining_stock[idx] > 0:
+                            preview = get_or_create_preview(row_data, product)
+                            preview.transfers.append(Transfer(
+                                sender=source_name, receiver=store, quantity=1
+                            ))
+                            remaining_stock[idx] -= 1
+                            current_store_qty[idx][store] += 1
 
-        # Create previews for rows without transfers
+        # Create empty previews for rows without transfers
         for product, data in product_data.items():
             for row_data in data["rows"]:
-                if row_data["original_idx"] not in previews_dict:
-                    previews_dict[row_data["original_idx"]] = TransferPreview(
+                idx = row_data["original_idx"]
+                if idx not in previews_dict:
+                    previews_dict[idx] = TransferPreview(
                         row_index=row_data["row_idx"],
                         product_name=product,
                         variant=row_data["variant"],
                     )
 
-        # Set per-row status fields
-        for original_idx, preview in previews_dict.items():
-            # Check if this row was skipped due to min-sizes rule
-            if original_idx in skipped_rows_reasons:
-                preview.skip_reason = skipped_rows_reasons[original_idx]
-
-            # Check if this product has <4 sizes (uses standard distribution)
-            if preview.product_name in products_under_4_sizes:
-                preview.uses_standard_distribution = True
-
-            # Check if this product uses fallback priority (not found in sales data)
+        # Set per-row status flags
+        for idx, preview in previews_dict.items():
             if preview.product_name in products_using_fallback:
                 preview.uses_fallback_priority = True
-            
-            # Set min_sizes_skipped flag
-            if original_idx in min_sizes_skipped_rows:
-                preview.min_sizes_skipped = True
-            
-            # Set skipped stores list
-            if original_idx in skipped_stores_per_row:
-                preview.skipped_stores = skipped_stores_per_row[original_idx]
+            if idx in target_not_reached_rows:
+                preview.target_not_reached = True
+            if idx in skipped_stores_per_row:
+                preview.skipped_stores = skipped_stores_per_row[idx]
+            if preview.product_name in products_filtered_out:
+                preview.skip_reason = (
+                    f"Товар не в диапазоне размеров ({size_min}–{size_max})"
+                )
 
-        # Sort by row index and return
-        previews = sorted(previews_dict.values(), key=lambda p: p.row_index)
-        return previews
+        return sorted(previews_dict.values(), key=lambda p: p.row_index)
 
     def execute(self, df: pd.DataFrame, source: str = "stock", header_row: int = 0) -> list[TransferResult]:
-        """
-        Execute distribution and return transfer results.
-
-        Args:
-            df: Input DataFrame (already loaded with correct header row)
-            source: "stock" for Сток, "photo" for Фото склад
-            header_row: 0-indexed header row in Excel
-
-        Returns:
-            List of TransferResult objects ready for download
-        """
+        """Execute distribution and return transfer results grouped by receiver."""
         source_name = self._get_source_name(source)
-
-        # Get preview (contains all transfers)
         previews = self.preview(df, source, header_row)
 
-        # Group transfers by (sender, receiver)
         transfers_grouped: dict[tuple[str, str], list[tuple[str, str, int]]] = {}
-
         for preview in previews:
             for transfer in preview.transfers:
                 key = (transfer.sender, transfer.receiver)
-                if key not in transfers_grouped:
-                    transfers_grouped[key] = []
-                transfers_grouped[key].append((
-                    preview.product_name,
-                    preview.variant,
-                    transfer.quantity
+                transfers_grouped.setdefault(key, []).append((
+                    preview.product_name, preview.variant, transfer.quantity
                 ))
 
-        # Create results
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         results = []
 
         for (sender, receiver), items in transfers_grouped.items():
-            # Extract store code from name (e.g., "125007 MSK-PC-..." -> "125007")
             receiver_code = receiver.split()[0] if receiver != source_name else "Сток"
 
-            # Create DataFrame for this transfer
             output_df = pd.DataFrame({
                 "Артикул": [""] * len(items),
                 "Код номенклатуры": [""] * len(items),
@@ -487,12 +331,8 @@ class StockDistributor:
             })
 
             filename = f"{source_name}_to_{receiver_code}_{timestamp}.xlsx"
-
             results.append(TransferResult(
-                sender=sender,
-                receiver=receiver_code,
-                filename=filename,
-                data=output_df
+                sender=sender, receiver=receiver_code, filename=filename, data=output_df
             ))
 
         return results
@@ -504,18 +344,7 @@ class StockDistributor:
         source: str = "stock",
         header_row: int = 0
     ) -> UpdatedInventoryResult:
-        """
-        Generate updated inventory Excel after distribution.
-
-        Args:
-            original_file: Original uploaded file (for preserving format)
-            df: Input DataFrame
-            source: "stock" or "photo"
-            header_row: 0-indexed header row
-
-        Returns:
-            UpdatedInventoryResult with Excel bytes
-        """
+        """Generate updated inventory Excel with stock decrements and store additions applied."""
         from .inventory_updater import generate_updated_inventory_result
 
         previews = self.preview(df, source, header_row)
@@ -523,9 +352,5 @@ class StockDistributor:
         source_name = self._get_source_name(source)
 
         return generate_updated_inventory_result(
-            original_file,
-            previews,
-            source_column,
-            source_name,
-            header_row
+            original_file, previews, source_column, source_name, header_row
         )

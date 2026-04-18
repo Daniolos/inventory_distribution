@@ -20,6 +20,7 @@ from core.config import (
     STOCK_COLUMN,
     PHOTO_STOCK_COLUMN,
     STORE_BALANCE_PAIRS,
+    MAX_UNITS_PER_SIZE,
 )
 from ui import (
     init_session_state,
@@ -78,8 +79,10 @@ def get_config() -> DistributionConfig:
         excluded_stores=st.session_state.excluded_stores,
         balance_threshold=st.session_state.balance_threshold,
         store_balance_pairs=STORE_BALANCE_PAIRS,
-        complete_distribution=st.session_state.complete_distribution,
-        min_sizes_to_add=st.session_state.min_sizes_to_add,
+        target_sizes_filled=st.session_state.target_sizes_filled,
+        units_per_size=st.session_state.units_per_size,
+        min_product_sizes=st.session_state.min_product_sizes,
+        max_product_sizes=st.session_state.max_product_sizes,
     )
 
 
@@ -186,20 +189,43 @@ with tab1:
 
     # Distribution options
     col_opt_a, col_opt_b = st.columns(2)
-    st.session_state.complete_distribution = col_opt_a.checkbox(
-        "Полное распределение",
-        value=st.session_state.complete_distribution,
+    st.session_state.target_sizes_filled = col_opt_a.number_input(
+        "Целевое количество размеров",
+        min_value=1,
+        max_value=30,
+        value=st.session_state.target_sizes_filled,
         help=(
-            "После обычного распределения добавить 2-й товар магазинам с 1 шт., "
-            "затем догрузить аутлет до 3 шт. на размер."
+            "Сколько размеров должно быть в магазине после распределения. "
+            "Если столько не получается передать — магазин пропускается (всё или ничего)."
         ),
     )
-    st.session_state.min_sizes_to_add = col_opt_b.number_input(
-        "Минимум размеров для передачи",
+    st.session_state.units_per_size = col_opt_b.number_input(
+        "Штук на размер",
         min_value=1,
-        max_value=3,
-        value=st.session_state.min_sizes_to_add,
-        help="Правило «все или ничего»: сколько размеров должно быть передано минимум.",
+        max_value=MAX_UNITS_PER_SIZE,
+        value=st.session_state.units_per_size,
+        help=(
+            "Сколько штук на размер должно быть в магазине. "
+            "Сначала все магазины получают по 1 шт., затем дополняются до 2 шт., потом до 3 шт."
+        ),
+    )
+
+    # Product size-count range filter
+    st.caption("Фильтр по количеству размеров товара:")
+    col_range_a, col_range_b = st.columns(2)
+    st.session_state.min_product_sizes = col_range_a.number_input(
+        "От (мин. размеров)",
+        min_value=1,
+        max_value=99,
+        value=st.session_state.min_product_sizes,
+        help="Распределять только товары, у которых не меньше стольких размеров.",
+    )
+    st.session_state.max_product_sizes = col_range_b.number_input(
+        "До (макс. размеров)",
+        min_value=1,
+        max_value=99,
+        value=st.session_state.max_product_sizes,
+        help="Распределять только товары, у которых не больше стольких размеров.",
     )
 
     # File upload
