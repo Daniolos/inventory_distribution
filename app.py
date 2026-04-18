@@ -78,6 +78,8 @@ def get_config() -> DistributionConfig:
         excluded_stores=st.session_state.excluded_stores,
         balance_threshold=st.session_state.balance_threshold,
         store_balance_pairs=STORE_BALANCE_PAIRS,
+        complete_distribution=st.session_state.complete_distribution,
+        min_sizes_to_add=st.session_state.min_sizes_to_add,
     )
 
 
@@ -181,6 +183,24 @@ with tab1:
         horizontal=True,
     )
     source = "stock" if "Сток" in source_option else "photo"
+
+    # Distribution options
+    col_opt_a, col_opt_b = st.columns(2)
+    st.session_state.complete_distribution = col_opt_a.checkbox(
+        "Полное распределение",
+        value=st.session_state.complete_distribution,
+        help=(
+            "После обычного распределения добавить 2-й товар магазинам с 1 шт., "
+            "затем догрузить аутлет до 3 шт. на размер."
+        ),
+    )
+    st.session_state.min_sizes_to_add = col_opt_b.number_input(
+        "Минимум размеров для передачи",
+        min_value=1,
+        max_value=3,
+        value=st.session_state.min_sizes_to_add,
+        help="Правило «все или ничего»: сколько размеров должно быть передано минимум.",
+    )
 
     # File upload
     uploaded_file = st.file_uploader(

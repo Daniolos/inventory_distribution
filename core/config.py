@@ -35,6 +35,10 @@ MIN_SIZES_THRESHOLD = 2  # If store has < this many sizes, apply min sizes rule
 MIN_SIZES_TO_ADD = 3     # Minimum number of different sizes required for transfer
 MIN_PRODUCT_SIZES_FOR_RULE = 4  # Product must have at least this many sizes
 
+# Outlet store (receives extra items in complete distribution mode, Phase C)
+OUTLET_STORE_ID = 125839  # MSK-PC-Outlet Белая Дача
+OUTLET_MAX_PER_SIZE = 3
+
 # Column names (these are fixed based on input format)
 STOCK_COLUMN = "Сток"
 PHOTO_STOCK_COLUMN = "Фото склад"

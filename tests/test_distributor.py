@@ -246,6 +246,246 @@ class TestPhotoStockDistribution:
             assert transfer.sender == "Фото"
 
 
+class TestCompleteDistribution:
+    """Tests for the optional complete distribution mode (Phase B + Phase C)."""
+
+    OUTLET_STORE = "125839 - MSK-PC-Outlet Белая Дача"
+
+    def _make_config(self, min_sizes_to_add: int = 3, complete: bool = True,
+                     include_outlet: bool = True, excluded: list[str] = None):
+        priority = list(STORE_COLS)
+        if include_outlet:
+            priority.append(self.OUTLET_STORE)
+        return DistributionConfig(
+            store_priority=priority,
+            excluded_stores=excluded or [],
+            balance_threshold=2,
+            complete_distribution=complete,
+            min_sizes_to_add=min_sizes_to_add,
+        )
+
+    def _add_outlet_col(self, rows: list[dict], outlet_qty: int = 0):
+        for row in rows:
+            row[self.OUTLET_STORE] = outlet_qty
+        return rows
+
+    def test_phase_b_bumps_store_with_one_item_to_two(self, config):
+        """Store with existing 1 item gets a 2nd item when complete_distribution enabled."""
+        # Stock=20 ensures Phase A completes with stock remaining for Phase B
+        rows = [
+            create_test_row(
+                "Product A", "Size M", stock=20,
+                store_quantities={"125007 MSK-PC-Гагаринский": 1},
+            )
+        ]
+        df = create_test_df(rows)
+
+        cfg = self._make_config(complete=True, include_outlet=False)
+        previews = StockDistributor(cfg).preview(df, source="stock", header_row=7)
+
+        transfers_to_first = [
+            t for p in previews for t in p.transfers
+            if t.receiver == "125007 MSK-PC-Гагаринский"
+        ]
+        # Phase A: skipped (has_stock). Phase B: +1 to reach 2.
+        assert len(transfers_to_first) == 1
+
+    def test_phase_b_bumps_store_that_received_in_phase_a(self, config):
+        """Store that got 1 item in Phase A also gets a 2nd item in Phase B."""
+        # Only 1 store available in priority + huge stock → Phase A gives 1, Phase B gives 2nd
+        cfg = DistributionConfig(
+            store_priority=["125007 MSK-PC-Гагаринский"],
+            excluded_stores=[],
+            complete_distribution=True,
+            min_sizes_to_add=3,
+        )
+        rows = [create_test_row("Product A", "Size M", stock=5)]
+        df = create_test_df(rows)
+
+        previews = StockDistributor(cfg).preview(df, source="stock", header_row=7)
+
+        transfers = [t for p in previews for t in p.transfers]
+        assert len(transfers) == 2
+        assert all(t.receiver == "125007 MSK-PC-Гагаринский" for t in transfers)
+
+    def test_phase_c_outlet_gets_up_to_three(self):
+        """Outlet fills to 3 items per size when stock allows."""
+        # Enough stock for Phase A (8 stores), Phase B (8 bumps), Phase C (+1 for outlet)
+        rows = [create_test_row("Product A", "Size M", stock=20)]
+        rows = self._add_outlet_col(rows)
+        df = create_test_df(rows)
+
+        cfg = self._make_config(complete=True)
+        previews = StockDistributor(cfg).preview(df, source="stock", header_row=7)
+
+        transfers_to_outlet = [
+            t for p in previews for t in p.transfers
+            if t.receiver == self.OUTLET_STORE
+        ]
+        # Phase A: 1, Phase B: +1, Phase C: +1 → 3 total
+        assert len(transfers_to_outlet) == 3
+
+    def test_phase_c_stops_when_stock_runs_out(self):
+        """Outlet stops at remaining_stock boundary even if under the cap."""
+        # Stock exactly matches number of non-outlet stores → outlet gets 0
+        num_non_outlet_stores = len(STORE_COLS)
+        rows = [create_test_row("Product A", "Size M", stock=num_non_outlet_stores)]
+        rows = self._add_outlet_col(rows)
+        df = create_test_df(rows)
+
+        cfg = self._make_config(complete=True)
+        previews = StockDistributor(cfg).preview(df, source="stock", header_row=7)
+
+        transfers_to_outlet = [
+            t for p in previews for t in p.transfers
+            if t.receiver == self.OUTLET_STORE
+        ]
+        assert len(transfers_to_outlet) == 0
+
+    def test_phase_c_respects_excluded_outlet(self):
+        """Excluded outlet does not receive items in Phase C."""
+        rows = [create_test_row("Product A", "Size M", stock=10)]
+        rows = self._add_outlet_col(rows)
+        df = create_test_df(rows)
+
+        cfg = self._make_config(complete=True, excluded=[self.OUTLET_STORE])
+        previews = StockDistributor(cfg).preview(df, source="stock", header_row=7)
+
+        transfers_to_outlet = [
+            t for p in previews for t in p.transfers
+            if t.receiver == self.OUTLET_STORE
+        ]
+        assert len(transfers_to_outlet) == 0
+
+    def test_complete_distribution_disabled_is_regression_safe(self, config):
+        """complete_distribution=False keeps legacy behavior: max 1 per store per variant."""
+        rows = [create_test_row("Product A", "Size M", stock=20)]
+        df = create_test_df(rows)
+
+        cfg = DistributionConfig(
+            store_priority=STORE_COLS,
+            excluded_stores=[],
+            complete_distribution=False,
+            min_sizes_to_add=3,
+        )
+        previews = StockDistributor(cfg).preview(df, source="stock", header_row=7)
+
+        # Legacy: exactly len(STORE_COLS) transfers, one per store
+        assert previews[0].total_quantity == len(STORE_COLS)
+        receivers = [t.receiver for t in previews[0].transfers]
+        assert len(set(receivers)) == len(STORE_COLS)
+
+    def test_phase_b_does_not_fire_for_stores_with_zero(self):
+        """Phase B only bumps stores with exactly 1 item — stores with 0 remain untouched by B."""
+        # Only one store available, no stock → Phase A gives 0, Phase B does nothing
+        cfg = DistributionConfig(
+            store_priority=["125007 MSK-PC-Гагаринский"],
+            excluded_stores=[],
+            complete_distribution=True,
+            min_sizes_to_add=3,
+        )
+        rows = [create_test_row("Product A", "Size M", stock=0)]
+        df = create_test_df(rows)
+
+        previews = StockDistributor(cfg).preview(df, source="stock", header_row=7)
+        assert sum(p.total_quantity for p in previews) == 0
+
+
+class TestConfigurableMinSizesToAdd:
+    """Tests for the configurable MIN_SIZES_TO_ADD threshold."""
+
+    def test_min_sizes_to_add_1_allows_single_size_transfer(self, config):
+        """With threshold=1, even a single available size triggers transfer for 4+ size product."""
+        # Product with 4 total sizes, store has 0 — min_sizes rule applies.
+        # Only 1 size has stock. Default (3): nothing transfers. With 1: transfer happens.
+        rows = [
+            create_test_row(
+                "MinSize Product", "Size S", stock=5,
+                store_quantities={"125007 MSK-PC-Гагаринский": 0},
+            ),
+            create_test_row(
+                "MinSize Product", "Size M", stock=0,
+                store_quantities={"125007 MSK-PC-Гагаринский": 0},
+            ),
+            create_test_row(
+                "MinSize Product", "Size L", stock=0,
+                store_quantities={"125007 MSK-PC-Гагаринский": 0},
+            ),
+            create_test_row(
+                "MinSize Product", "Size XL", stock=0,
+                store_quantities={"125007 MSK-PC-Гагаринский": 0},
+            ),
+        ]
+        df = create_test_df(rows)
+
+        cfg = DistributionConfig(
+            store_priority=STORE_COLS,
+            excluded_stores=[],
+            complete_distribution=False,
+            min_sizes_to_add=1,
+        )
+        previews = StockDistributor(cfg).preview(df, source="stock", header_row=7)
+
+        total = sum(p.total_quantity for p in previews)
+        assert total > 0
+        # Ensure first store received the single available size
+        first_store_transfers = [
+            t for p in previews for t in p.transfers
+            if t.receiver == "125007 MSK-PC-Гагаринский"
+        ]
+        assert len(first_store_transfers) == 1
+
+    def test_min_sizes_to_add_2_allows_two_size_transfer(self, config):
+        """With threshold=2, 2 available sizes suffice; default 3 would skip."""
+        rows = [
+            create_test_row("MinSize Product", "Size S", stock=5),
+            create_test_row("MinSize Product", "Size M", stock=5),
+            create_test_row("MinSize Product", "Size L", stock=0),
+            create_test_row("MinSize Product", "Size XL", stock=0),
+        ]
+        df = create_test_df(rows)
+
+        cfg = DistributionConfig(
+            store_priority=STORE_COLS,
+            excluded_stores=[],
+            complete_distribution=False,
+            min_sizes_to_add=2,
+        )
+        previews = StockDistributor(cfg).preview(df, source="stock", header_row=7)
+
+        first_store_transfers = [
+            t for p in previews for t in p.transfers
+            if t.receiver == "125007 MSK-PC-Гагаринский"
+        ]
+        # Both available sizes transferred
+        assert len(first_store_transfers) == 2
+
+    def test_min_sizes_to_add_3_default_skips_when_two_sizes(self, config):
+        """Regression: default threshold=3 still skips when only 2 sizes available."""
+        rows = [
+            create_test_row("MinSize Product", "Size S", stock=5),
+            create_test_row("MinSize Product", "Size M", stock=5),
+            create_test_row("MinSize Product", "Size L", stock=0),
+            create_test_row("MinSize Product", "Size XL", stock=0),
+        ]
+        df = create_test_df(rows)
+
+        # Default min_sizes_to_add = 3
+        cfg = DistributionConfig(
+            store_priority=STORE_COLS,
+            excluded_stores=[],
+            complete_distribution=False,
+            min_sizes_to_add=3,
+        )
+        previews = StockDistributor(cfg).preview(df, source="stock", header_row=7)
+
+        first_store_transfers = [
+            t for p in previews for t in p.transfers
+            if t.receiver == "125007 MSK-PC-Гагаринский"
+        ]
+        assert len(first_store_transfers) == 0
+
+
 class TestExcelRowCalculation:
     """Tests for correct Excel row number calculation.
 

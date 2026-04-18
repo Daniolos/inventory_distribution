@@ -286,6 +286,10 @@ class DistributionConfig:
     balance_threshold: int = 2
     store_balance_pairs: list[tuple[str, str]] = field(default_factory=list)
 
+    # Script 1 (Stock → Stores) options
+    complete_distribution: bool = False
+    min_sizes_to_add: int = 3
+
     # Column names
     stock_column: str = "Сток"
     photo_stock_column: str = "Фото склад"
@@ -321,6 +325,8 @@ class DistributionConfig:
             "excluded_stores": self.excluded_stores,
             "balance_threshold": self.balance_threshold,
             "store_balance_pairs": [list(pair) for pair in self.store_balance_pairs],
+            "complete_distribution": self.complete_distribution,
+            "min_sizes_to_add": self.min_sizes_to_add,
         }
 
     @classmethod
@@ -332,4 +338,6 @@ class DistributionConfig:
             excluded_stores=data.get("excluded_stores", []),
             balance_threshold=data.get("balance_threshold", 2),
             store_balance_pairs=[tuple(pair) for pair in pairs],
+            complete_distribution=data.get("complete_distribution", False),
+            min_sizes_to_add=data.get("min_sizes_to_add", 3),
         )

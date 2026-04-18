@@ -21,6 +21,10 @@ def init_session_state():
         st.session_state.excluded_stores = DEFAULT_EXCLUDED_STORES.copy()
     if "balance_threshold" not in st.session_state:
         st.session_state.balance_threshold = DEFAULT_BALANCE_THRESHOLD
+    if "complete_distribution" not in st.session_state:
+        st.session_state.complete_distribution = False
+    if "min_sizes_to_add" not in st.session_state:
+        st.session_state.min_sizes_to_add = 3
     
     # Preview/Results for Script 1 (Stock → Stores)
     if "preview_results_script1" not in st.session_state:
