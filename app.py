@@ -4,6 +4,8 @@ Inventory Distribution Streamlit App
 A user-friendly web interface for distributing inventory between stores.
 """
 
+import io
+
 import streamlit as st
 import pandas as pd
 
@@ -22,6 +24,7 @@ from core.config import (
     STORE_BALANCE_PAIRS,
     MAX_UNITS_PER_SIZE,
 )
+from core.models import TransferResult, UpdatedInventoryResult
 from ui import (
     init_session_state,
     move_store_up,
@@ -30,6 +33,49 @@ from ui import (
     render_preview,
     render_results,
 )
+
+
+def merge_transfer_results(
+    existing: list[TransferResult],
+    new: list[TransferResult]
+) -> list[TransferResult]:
+    """Combine accumulated results with a new run's results, grouping by (sender, receiver)."""
+    by_key: dict[tuple[str, str], TransferResult] = {
+        (r.sender, r.receiver): r for r in existing
+    }
+    for r in new:
+        key = (r.sender, r.receiver)
+        if key in by_key:
+            prev = by_key[key]
+            prev.data = pd.concat([prev.data, r.data], ignore_index=True)
+        else:
+            by_key[key] = r
+    return list(by_key.values())
+
+
+def merge_updated_inventory(
+    existing: UpdatedInventoryResult | None,
+    new: UpdatedInventoryResult
+) -> UpdatedInventoryResult:
+    """Combine UpdatedInventoryResult: latest bytes/filename, totals summed, warnings concatenated."""
+    if existing is None:
+        return new
+    existing.data = new.data
+    existing.filename = new.filename
+    existing.source_column = new.source_column
+    existing.total_rows_updated += new.total_rows_updated
+    existing.total_quantity_transferred += new.total_quantity_transferred
+    existing.warnings.extend(new.warnings)
+    return existing
+
+
+def reset_script1_runs():
+    """Reset multi-pass state for Tab 1, restoring working bytes to the original upload."""
+    st.session_state.working_bytes_script1 = st.session_state.original_bytes_script1
+    st.session_state.preview_results_script1 = None
+    st.session_state.transfer_results_script1 = None
+    st.session_state.updated_inventory_script1 = None
+    st.session_state.run_count_script1 = 0
 
 # Page config
 st.set_page_config(
@@ -237,15 +283,46 @@ with tab1:
 
     if uploaded_file:
         try:
-            # Auto-detect header row
-            header_row, header_error = find_header_row(uploaded_file)
+            # Detect new upload (by name + size) → auto-reset working state
+            identity = f"{uploaded_file.name}:{uploaded_file.size}"
+            if identity != st.session_state.upload_identity_script1:
+                uploaded_file.seek(0)
+                original_bytes = uploaded_file.read()
+                st.session_state.upload_identity_script1 = identity
+                st.session_state.original_bytes_script1 = original_bytes
+                st.session_state.working_bytes_script1 = original_bytes
+                st.session_state.preview_results_script1 = None
+                st.session_state.transfer_results_script1 = None
+                st.session_state.updated_inventory_script1 = None
+                st.session_state.run_count_script1 = 0
+
+            # All reads use the current working inventory (reflects prior runs)
+            working_stream = io.BytesIO(st.session_state.working_bytes_script1)
+            header_row, header_error = find_header_row(working_stream)
             if header_error:
                 st.error(header_error)
                 st.info(f"Совет: Убедитесь, что в Excel файле есть столбец '{PRODUCT_NAME_COLUMN}' в заголовке.")
             else:
-                # Skip the sub-header row (contains "Остаток на складе") right after header
-                df = pd.read_excel(uploaded_file, header=header_row, skiprows=[header_row + 1])
-                st.success(f"Файл загружен: {len(df)} строк (заголовок найден в строке {header_row + 1})")
+                working_stream.seek(0)
+                df = pd.read_excel(working_stream, header=header_row, skiprows=[header_row + 1])
+
+                run_count = st.session_state.run_count_script1
+                if run_count == 0:
+                    st.success(f"Файл загружен: {len(df)} строк (заголовок найден в строке {header_row + 1})")
+                else:
+                    inv = st.session_state.updated_inventory_script1
+                    total_qty = inv.total_quantity_transferred if inv else 0
+                    col_status, col_reset = st.columns([5, 1])
+                    col_status.info(
+                        f"Выполнено проходов: **{run_count}** • Всего перемещено: **{total_qty}** ед. • "
+                        f"следующий проход будет на обновлённом остатке."
+                    )
+                    col_reset.button(
+                        "🔄 Сброс",
+                        key="reset_script1",
+                        on_click=reset_script1_runs,
+                        help="Вернуться к исходному файлу и очистить все накопленные перемещения",
+                    )
 
                 # Validate
                 is_valid, errors = validate_file(df)
@@ -268,8 +345,6 @@ with tab1:
 
                         with st.spinner("Генерация предпросмотра..."):
                             st.session_state.preview_results_script1 = distributor.preview(df_filtered, source, header_row)
-                            st.session_state.transfer_results_script1 = None
-                            st.session_state.updated_inventory_script1 = None
 
                     if col2.button("Создать перемещения", key="execute_script1", type="primary"):
                         config = get_config()
@@ -279,26 +354,43 @@ with tab1:
                         )
 
                         with st.spinner("Создание перемещений..."):
-                            st.session_state.transfer_results_script1 = distributor.execute(df_filtered, source, header_row)
+                            new_results = distributor.execute(df_filtered, source, header_row)
 
-                            # Generate updated inventory Excel
-                            uploaded_file.seek(0)  # Reset file pointer
-                            st.session_state.updated_inventory_script1 = distributor.generate_updated_inventory(
-                                uploaded_file,
+                            update_source = io.BytesIO(st.session_state.working_bytes_script1)
+                            new_inventory = distributor.generate_updated_inventory(
+                                update_source,
                                 df_filtered,
                                 source,
                                 header_row
                             )
 
-                    # Display results
-                    if st.session_state.preview_results_script1 and not st.session_state.transfer_results_script1:
+                            existing_results = st.session_state.transfer_results_script1 or []
+                            st.session_state.transfer_results_script1 = merge_transfer_results(
+                                existing_results, new_results
+                            )
+                            st.session_state.updated_inventory_script1 = merge_updated_inventory(
+                                st.session_state.updated_inventory_script1, new_inventory
+                            )
+                            # Feed the updated inventory into the next run
+                            st.session_state.working_bytes_script1 = new_inventory.data
+                            st.session_state.run_count_script1 += 1
+                            # Preview reflects a state that no longer exists
+                            st.session_state.preview_results_script1 = None
+
+                    # Display current-run preview (only new transfers from the pending run)
+                    if st.session_state.preview_results_script1:
                         st.divider()
-                        st.subheader("Предпросмотр")
+                        preview_title = (
+                            "Предпросмотр" if run_count == 0
+                            else f"Предпросмотр следующего прохода (№{run_count + 1})"
+                        )
+                        st.subheader(preview_title)
                         render_preview(
-                            st.session_state.preview_results_script1, 
+                            st.session_state.preview_results_script1,
                             prefix="script1"
                         )
 
+                    # Display accumulated results (all executed runs combined)
                     if st.session_state.transfer_results_script1:
                         st.divider()
                         st.subheader("Загрузки")

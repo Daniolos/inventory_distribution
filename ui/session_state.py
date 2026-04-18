@@ -35,12 +35,26 @@ def init_session_state():
         st.session_state.max_product_sizes = DEFAULT_MAX_PRODUCT_SIZES
     
     # Preview/Results for Script 1 (Stock → Stores)
+    # preview_results_script1: only the CURRENT run's preview (not accumulated)
+    # transfer_results_script1: accumulated results across all executed runs
+    # updated_inventory_script1: cumulative UpdatedInventoryResult (totals summed, latest bytes)
+    # original_bytes_script1 / working_bytes_script1: original upload vs. current working inventory
+    # upload_identity_script1: name+size of last seen upload (used to auto-reset on new upload)
+    # run_count_script1: how many executions have been accumulated
     if "preview_results_script1" not in st.session_state:
         st.session_state.preview_results_script1 = None
     if "transfer_results_script1" not in st.session_state:
         st.session_state.transfer_results_script1 = None
     if "updated_inventory_script1" not in st.session_state:
         st.session_state.updated_inventory_script1 = None
+    if "original_bytes_script1" not in st.session_state:
+        st.session_state.original_bytes_script1 = None
+    if "working_bytes_script1" not in st.session_state:
+        st.session_state.working_bytes_script1 = None
+    if "upload_identity_script1" not in st.session_state:
+        st.session_state.upload_identity_script1 = None
+    if "run_count_script1" not in st.session_state:
+        st.session_state.run_count_script1 = 0
     
     # Preview/Results for Script 2 (Balance Inventory)
     if "preview_results_script2" not in st.session_state:
